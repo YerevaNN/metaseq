@@ -11,6 +11,7 @@ from metaseq.logging.progress_bar.json_progress_bar import JsonProgressBar
 from metaseq.logging.progress_bar.tensorboard_progress_bar import (
     TensorboardProgressBarWrapper,
 )
+from metaseq.logging.progress_bar.aim_progress_bar import AimProgressBarWrapper
 from metaseq.logging.progress_bar.wandb_progress_bar import WandBProgressBarWrapper
 
 
@@ -22,6 +23,9 @@ def get_progress_bar(
     epoch: Optional[int] = None,
     prefix: Optional[str] = None,
     tensorboard_logdir: Optional[str] = None,
+    aim_repo: Optional[str] = None,
+    aim_run_hash: Optional[str] = None,
+    aim_param_checkpoint_dir: Optional[str] = None,
     wandb_project: Optional[str] = None,
     wandb_run_name: Optional[str] = None,
 ):
@@ -36,6 +40,14 @@ def get_progress_bar(
 
     if tensorboard_logdir:
         bar = TensorboardProgressBarWrapper(bar, tensorboard_logdir)
+
+    if aim_repo:
+        bar = AimProgressBarWrapper(
+            bar,
+            aim_repo=aim_repo,
+            aim_run_hash=aim_run_hash,
+            aim_param_checkpoint_dir=aim_param_checkpoint_dir,
+        )
 
     if wandb_project:
         bar = WandBProgressBarWrapper(bar, wandb_project, run_name=wandb_run_name)
