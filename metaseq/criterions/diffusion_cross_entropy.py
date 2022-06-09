@@ -78,7 +78,6 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
                     if value is None:
                         # maybe future proofing relative positional embeddings
                         continue
-                    value = emb[key]
                     logging_output[f"{key}_norm"] = value.norm(p=2, dim=-1).sum(
                         dtype=torch.float32
                     )

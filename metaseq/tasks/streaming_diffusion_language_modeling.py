@@ -58,6 +58,14 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
     select_T_strategy: Optional[str] = field(
         default="uniform", metadata={"help": "T distrbution"}
     )
+    eviction_policy: str = field(
+        default="random",
+        metadata={"help": "policy by which to remove extra diffused steps from the buffer"},
+    )
+    max_buffer_size: int = field(
+        default=20,
+        metadata={"help": "maximum number of samples in the buffer"},
+    )
 
 
 @register_task(
@@ -146,6 +154,8 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
             # 1284 is a randomly-generated offset to decouple the seed used here
             # from the seed used above in StreamingShuffleDataset
             seed=1284 + self.args.seed,
+            eviction_policy=self.args.eviction_policy,
+            max_buffer_size=self.args.max_buffer_size
         )
 
     def build_model(self, args: Namespace):
@@ -178,10 +188,20 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         input = tokens[:, :-1].contiguous()
         target = tokens[:, 1:].contiguous()
 
-        ids = torch.cat([x["ids"] for x in items if x is not None])
-        embeddings = torch.cat([x["token_embeddings"] for x in items if x is not None])
-        timesteps = torch.cat([x["T"] for x in items if x is not None])
-        split = torch.cat([x["split"] for x in items if x is not None])
+        ids_list = []
+        for x in items:
+            if x["ids"].numel() == 0:
+                ids_list.append(torch.tensor([-1]))
+            elif x is not None:
+                ids_list.append(x["ids"])
+        # ids = torch.stack(ids_list, dim=0)
+        ids = torch.cat(ids_list).unsqueeze(-1)
+
+        # ids = torch.cat([x["ids"] for x in items if x is not None])
+        embeddings = torch.stack([x["token_embeddings"] for x in items if x is not None], dim=0)
+        timesteps = torch.tensor([x["T"] for x in items if x is not None])
+        split = [x["split"] for x in items if x is not None]
+        # split = torch.cat([x["split"] for x in items if x is not None])
         if ids.numel() != torch.unique(ids).numel():
             n_duplicate = ids.numel() - torch.unique(ids).numel()
             logger.error(

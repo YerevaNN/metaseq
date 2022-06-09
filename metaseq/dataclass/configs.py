@@ -91,7 +91,7 @@ class CommonConfig(MetaseqDataclass):
         },
     )
     log_format: Optional[LOG_FORMAT_CHOICES] = field(
-        default=None, metadata={"help": "log format to use"}
+        default="json", metadata={"help": "log format to use"}
     )
     log_file: Optional[str] = field(
         default=None, metadata={"help": "log file to copy metrics to."}
