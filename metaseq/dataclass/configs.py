@@ -144,8 +144,8 @@ class CommonConfig(MetaseqDataclass):
     fp16_no_flatten_grads: bool = field(
         default=False, metadata={"help": "don't flatten FP16 grads tensor"}
     )
-    fp16_init_scale: int = field(
-        default=4, metadata={"help": "default FP16 loss scale"}
+    fp16_init_scale: float = field(
+        default=4.0, metadata={"help": "default FP16 loss scale"}
     )
     fp16_scale_window: Optional[int] = field(
         default=256,

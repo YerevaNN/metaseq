@@ -68,8 +68,6 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
             max_buffer_size=max_buffer_size,
         )
         self.replay_buffer = defaultdict(buffer_stack)
-        # self.replay_buffer = defaultdict(list)
-        # collections.deque(maxlen=5)
         self.embedding_module = embedding_module
         self.split = split
 
@@ -115,16 +113,15 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
                 # TODO: check this logic
                 if self.embedding_module.weight.dtype == torch.float16:
                     item_diff["probs"] = item_diff["probs"].half()
-                with torch.no_grad():
-                    yield {
-                        "T": T,
-                        "block": item_diff["block"],
-                        "ids": item_diff["ids"],
-                        "token_embeddings": (
-                            item_diff["probs"].to(device) @ self.embedding_module.weight
-                        ).cpu(),
-                        "split": self.split,
-                    }
+                yield {
+                    "T": T,
+                    "block": item_diff["block"],
+                    "ids": item_diff["ids"],
+                    "token_embeddings": (
+                        item_diff["probs"].to(device) @ self.embedding_module.weight
+                    ).cpu(),
+                    "split": self.split,
+                }
                 del self.replay_buffer[T]
 
     def update_buffer_batch(self, T: torch.Tensor, probs: torch.Tensor, item: dict):

@@ -82,5 +82,15 @@ class AimProgressBarWrapper(BaseProgressBar):
         else:
             context = {"tag": tag}
 
+        # custom context
+        # if "diff_loss" in tag:
+
         for key in stats.keys() - {"num_updates"}:
-            self.run.track(stats[key], name=key, step=step, context=context)
+            if stats[key] is not None:
+                if key == "loss" or "diff_loss" in key:
+                    context["metric"] = "loss"
+                elif key == "ppl" or "diff_ppl" in key:
+                    context["metric"] = "ppl"
+                self.run.track(stats[key], name=key, step=step, context=context)
+            else:
+                print(key)

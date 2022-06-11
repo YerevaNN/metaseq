@@ -219,7 +219,7 @@ def yield_token_blocks(iterable, block_size, drop_last, padding_idx):
                 block = torch.cat(cur_block)
                 assert block.numel() == block_size
                 yield {
-                    "ids": torch.LongTensor(cur_block_ids),
+                    "ids": torch.LongTensor(cur_block_ids).clone(),
                     "block": block[:block_size],
                 }
 

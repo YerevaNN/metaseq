@@ -83,6 +83,9 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
     Args:
         tokenizer (tokenizers.ByteLevelBPETokenizer): the BPE tokenizer to use
     """
+    def __init__(self, args):
+        super().__init__(args)
+        self.max_T = args.max_T
 
     def load_dataset(self, split: str, epoch=1, combine=False, **kwargs):
         """Load a given dataset split.
@@ -176,7 +179,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         return self.model
 
     def _collate_fn(self, items: List[Dict[str, Any]]):
-        print(items)
+        # print(items)
         # StreamingTokenBlockDataset returns None as filler\
         if len([x for x in items if x is not None]) == 0:
             return {}
@@ -190,27 +193,18 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         input = tokens[:, :-1].contiguous()
         target = tokens[:, 1:].contiguous()
 
-        # ids_list = []
-        # for x in items:
-        #     if x["ids"].numel() == 0:
-        #         ids_list.append(torch.tensor([-1]))
-        #     elif x is not None:
-        #         ids_list.append(x["ids"])
-        # # ids = torch.stack(ids_list, dim=0)
-        # ids = torch.cat(ids_list).unsqueeze(-1)
-
-        ids = torch.cat([x["ids"] for x in items if x is not None])
+        ids = torch.cat([torch.tensor([0]) for x in items if x is not None])
         embeddings = torch.stack(
             [x["token_embeddings"] for x in items if x is not None], dim=0
         )
         timesteps = torch.tensor([x["T"] for x in items if x is not None])
         split = [x["split"] for x in items if x is not None]
 
-        if ids.numel() != torch.unique(ids).numel():
-            n_duplicate = ids.numel() - torch.unique(ids).numel()
-            logger.error(
-                f"found {n_duplicate}/{ids.numel()} duplicate document IDs in the same batch!"
-            )
+        # if ids.numel() != torch.unique(ids).numel():
+        #     n_duplicate = ids.numel() - torch.unique(ids).numel()
+        #     logger.error(
+        #         f"found {n_duplicate}/{ids.numel()} duplicate document IDs in the same batch!"
+        #     )
 
         # metaseq expects batches to have the following structure
         return {

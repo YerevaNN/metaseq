@@ -42,7 +42,7 @@ class DynamicLossScaler(object):
             self.loss_scale *= self.scale_factor
             self._last_rescale_iter = self._iter
             # When scaling up loss_scale, also scale up the scale_window.
-            self.scale_window *= self.scale_factor
+            self.scale_window = int( self.scale_window * self.scale_factor)
         self._iter += 1
 
     def _decrease_loss_scale(self):
