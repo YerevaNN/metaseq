@@ -83,7 +83,6 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
     Args:
         tokenizer (tokenizers.ByteLevelBPETokenizer): the BPE tokenizer to use
     """
-
     def __init__(self, args):
         super().__init__(args)
         self.max_T = args.max_T
