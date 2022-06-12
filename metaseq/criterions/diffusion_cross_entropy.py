@@ -51,7 +51,9 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample["net_input"])
-        loss, unreduced_loss = self.compute_loss(model, net_output, sample, reduce=reduce)
+        loss, unreduced_loss = self.compute_loss(
+            model, net_output, sample, reduce=reduce
+        )
         sample_size = sample["ntokens"]
         logging_output = {
             "loss": loss.data,
@@ -65,12 +67,15 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
 
         unreduced_loss_reshaped = torch.reshape(unreduced_loss, (len(sample["T"]), -1))
 
-        for t in range(max(sample["T"])+1):
-            indices = torch.tensor([i for i in range(len(sample["T"])) if bool(sample["T"][i] == t)])
+        for t in range(max(sample["T"]) + 1):
+            indices = torch.tensor(
+                [i for i in range(len(sample["T"])) if bool(sample["T"][i] == t)]
+            )
             if indices.numel() == 0:
                 continue
             t_loss = torch.index_select(unreduced_loss_reshaped.cpu(), 0, indices)
-            logging_output[f"diff_loss_{t}"] = t_loss.flatten().detach().mean()
+            logging_output[f"diff_loss_{t}"] = t_loss.flatten().detach().sum()
+            logging_output[f"diff_loss_{t}_size"] = t_loss.numel()
 
         if "src_tokens" in sample["net_input"] and hasattr(self.task, "eod"):
             logging_output["ndocseps"] = (sample["target"] == self.task.eod).sum()
@@ -120,11 +125,14 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get("loss", 0) for log in logging_outputs)
-        diffused_losses_keys = [key for key, value in logging_outputs[0].items()
-                                if key.startswith("diff_loss_") and value != 0.0]
         diffused_losses_sum = {}
-        for key in diffused_losses_keys:
-            diffused_losses_sum[key] = sum(log.get(key, 0) for log in logging_outputs)
+        for i in range(5):
+            key = f"diff_loss_{i}"
+            if any(key in log for log in logging_outputs):
+                diffused_losses_sum[key] = (
+                    sum(log.get(key, 0) for log in logging_outputs),
+                    sum(log.get(f"{key}_size", 0) for log in logging_outputs),
+                )
 
         ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
         sample_size = sum(log.get("sample_size", 0) for log in logging_outputs)
@@ -139,13 +147,11 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
         metrics.log_scalar(
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
-        for key, value in diffused_losses_sum.items():
+        for key, (value, key_sample_size) in diffused_losses_sum.items():
             metrics.log_scalar(
-                key, value / math.log(2), round=3
+                key, value / key_sample_size / math.log(2), key_sample_size, round=3
             )
-            metrics.log_scalar(
-                f"diff_ppl_{key[-1]}", torch.pow(2, value), round=3
-            )
+            # metrics.log_scalar(f"diff_ppl_{key[-1]}", torch.pow(2, value), round=3)
         if sample_size != ntokens:
             metrics.log_scalar(
                 "nll_loss", loss_sum / ntokens / math.log(2), ntokens, round=3

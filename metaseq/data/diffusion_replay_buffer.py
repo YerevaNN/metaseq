@@ -97,15 +97,12 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
             T = self.sample_diffusion_step_existing()
             device = self.embedding_module.weight.device
             if T == 0:
+                inp = self.item_input(item["block"], device)
                 yield {
                     "T": 0,
                     "block": item["block"],
                     "ids": item["ids"],
-                    "token_embeddings": self.embedding_module(
-                        self.item_input(item["block"], device)
-                    )
-                    .squeeze()
-                    .cpu(),
+                    "token_embeddings": self.embedding_module(inp).squeeze().cpu(),
                     "split": self.split,
                 }
             else:
