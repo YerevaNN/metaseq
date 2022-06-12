@@ -148,9 +148,10 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
             "loss", loss_sum / sample_size / math.log(2), sample_size, round=3
         )
         for key, (value, key_sample_size) in diffused_losses_sum.items():
-            metrics.log_scalar(
-                key, value / key_sample_size / math.log(2), key_sample_size, round=3
-            )
+            if key_sample_size != 0:
+                metrics.log_scalar(
+                    key, value / key_sample_size / math.log(2), key_sample_size, round=3
+                )
             # metrics.log_scalar(f"diff_ppl_{key[-1]}", torch.pow(2, value), round=3)
         if sample_size != ntokens:
             metrics.log_scalar(
