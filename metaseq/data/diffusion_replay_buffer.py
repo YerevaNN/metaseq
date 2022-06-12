@@ -109,7 +109,8 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
                     "split": self.split,
                 }
             else:
-                item_diff = np.random.choice(self.replay_buffer[T])
+                item_idx = np.random.randint(0, len(self.replay_buffer[T]))
+                item_diff = self.replay_buffer[T][item_idx]
                 # TODO: check this logic
                 if self.embedding_module.weight.dtype == torch.float16:
                     item_diff["probs"] = item_diff["probs"].half()
@@ -122,7 +123,7 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
                     ).cpu(),
                     "split": self.split,
                 }
-                del self.replay_buffer[T]
+                del self.replay_buffer[T][item_idx]
 
     def update_buffer_batch(self, T: torch.Tensor, probs: torch.Tensor, item: dict):
         T_item = T[0].cpu().detach().item()
