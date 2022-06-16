@@ -83,6 +83,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
     Args:
         tokenizer (tokenizers.ByteLevelBPETokenizer): the BPE tokenizer to use
     """
+
     def __init__(self, args):
         super().__init__(args)
         self.max_T = args.max_T
@@ -194,9 +195,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         target = tokens[:, 1:].contiguous()
 
         ids = torch.cat([torch.tensor([0]) for x in items if x is not None])
-        probs = torch.stack(
-            [x["probs"] for x in items if x is not None], dim=0
-        )
+        probs = torch.stack([x["probs"] for x in items if x is not None], dim=0)
         timesteps = torch.tensor([x["T"] for x in items if x is not None])
         split = [x["split"] for x in items if x is not None]
 
