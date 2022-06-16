@@ -23,6 +23,7 @@ from metaseq.models.transformer import (
     Embedding,
     TransformerDecoder,
 )
+from metaseq.modules import ProbabilisticEmbedding
 
 DEFAULT_MAX_TARGET_POSITIONS = 1024
 
@@ -159,6 +160,13 @@ class TransformerLanguageModelConfig(MetaseqDataclass):
     no_emb_dropout: Optional[bool] = field(
         default=False, metadata={"help": "Avoid emb dropout for decoder"}
     )
+    use_probabilistic_embedding: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Use probabilistic embedding for diffusion models"},
+    )
+    use_probabilistic_embedding_proj_rank: Optional[int] = field(
+        default=-1, metadata={"help": "Top probabilities to take before projecting"}
+    )
 
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
@@ -210,7 +218,16 @@ class TransformerLanguageModel(LanguageModel):
                     "It is recommended to pass --no-scale-embedding with --use-stable-embedding"
                 )
             return bnb.nn.StableEmbedding(len(dictionary), embed_dim, dictionary.pad())
-
+        if getattr(args, "use_probabilistic_embedding", False):
+            return ProbabilisticEmbedding(
+                len(dictionary),
+                embed_dim,
+                dictionary.pad(),
+                getattr(args, "use_probabilistic_embedding_proj_rank", -1),
+                initialize_params_on_gpu=getattr(
+                    args, "tensor_parallel_init_model_on_gpu", False
+                ),
+            )
         else:
             return Embedding(
                 len(dictionary),

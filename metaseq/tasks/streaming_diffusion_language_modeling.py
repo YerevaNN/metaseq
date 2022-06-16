@@ -20,7 +20,7 @@ from metaseq.data import (
     JsonlDataset,
     PartitionedStreamingDataset,
     ResamplingDataset,
-    StreamingDiffusionTokenBlockDatasetWithReplayBuffer,
+    StreamingDiffusionTokenBlockDatasetWithReplayBufferV2,
     StreamingShuffleDataset,
     StreamingSrcTgtDataset,
     StreamingTokenBlockDataset,
@@ -143,9 +143,9 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
             pdf = [1.0 / self.args.max_T] * self.args.max_T
         else:
             raise Exception
-        self.datasets[split] = StreamingDiffusionTokenBlockDatasetWithReplayBuffer(
+        self.datasets[split] = StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(
             pdf,
-            self.model.decoder.embed_tokens,
+            len(self.source_dictionary),
             split,
             dataset,
             # We generate blocks with one extra token, so that we have a target
@@ -194,8 +194,8 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         target = tokens[:, 1:].contiguous()
 
         ids = torch.cat([torch.tensor([0]) for x in items if x is not None])
-        embeddings = torch.stack(
-            [x["token_embeddings"] for x in items if x is not None], dim=0
+        probs = torch.stack(
+            [x["probs"] for x in items if x is not None], dim=0
         )
         timesteps = torch.tensor([x["T"] for x in items if x is not None])
         split = [x["split"] for x in items if x is not None]
@@ -211,7 +211,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
             "id": ids,
             "net_input": {
                 "src_tokens": input,
-                "token_embeddings": embeddings,
+                "probs": probs,
                 "full_context_alignment": torch.all(timesteps > 0).item(),
             },
             "target": target,

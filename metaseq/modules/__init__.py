@@ -12,6 +12,7 @@ from .multihead_attention import MultiheadAttention
 from .positional_embedding import PositionalEmbedding
 from .sinusoidal_positional_embedding import SinusoidalPositionalEmbedding
 from .transformer_layer import TransformerDecoderLayer, TransformerEncoderLayer
+from .probabilistic_embedding import ProbabilisticEmbedding
 
 __all__ = [
     "Dropout",
@@ -22,6 +23,7 @@ __all__ = [
     "LearnedPositionalEmbedding",
     "MultiheadAttention",
     "PositionalEmbedding",
+    "ProbabilisticEmbedding",
     "SinusoidalPositionalEmbedding",
     "TransformerDecoderLayer",
     "TransformerEncoderLayer",
