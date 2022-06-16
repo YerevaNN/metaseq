@@ -99,7 +99,6 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
                     logging_output[f"{key}_norm"] = value.norm(p=2, dim=-1).sum(
                         dtype=torch.float32
                     )
-
         return loss, sample_size, logging_output
 
     def compute_loss(self, model, net_output, sample, reduce=True):

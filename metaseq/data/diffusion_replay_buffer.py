@@ -18,7 +18,6 @@ def create_delta_distribution(x, y):
         y[i, x[i]] = 1
     return y
 
-
 class BufferStack(list):
     def __init__(self, eviction_policy: str = "random", max_buffer_size: int = 20):
         self.eviction_policy = eviction_policy

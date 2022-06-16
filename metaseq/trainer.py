@@ -1043,7 +1043,7 @@ class Trainer(object):
         def lower_precision(t):
             """Converts a tensor to the desired dtype based on our cfg."""
             if t.dtype is torch.float32:
-                if self.cfg.bf16:
+                if self.cfg.common.bf16:
                     return t.bfloat16()
                 return t.half()
             return t

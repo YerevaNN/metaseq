@@ -570,6 +570,7 @@ class TransformerDecoder(IncrementalDecoder):
         self,
         tokens,
         token_embedding: Optional[torch.Tensor] = None,
+        token_probs: Optional[torch.Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
     ):
         # embed tokens and positions
@@ -587,7 +588,10 @@ class TransformerDecoder(IncrementalDecoder):
                 positions = positions[:, -1:]
 
         if token_embedding is None:
-            token_embedding = self.embed_tokens(tokens)
+            if token_probs is None:
+                token_embedding = self.embed_tokens(tokens)
+            else:
+                token_embedding = self.embed_tokens(token_probs)
 
         x = embed = self.embed_scale * token_embedding
 
@@ -615,6 +619,7 @@ class TransformerDecoder(IncrementalDecoder):
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        token_probs: Optional[torch.Tensor] = None,
     ):
         """
         Includes several features from "Jointly Learning to Align and
@@ -645,7 +650,6 @@ class TransformerDecoder(IncrementalDecoder):
                 - the decoder's output of shape `(batch, tgt_len, vocab)`
                 - a dictionary with any model-specific outputs
         """
-
         # see IncrementalDecoder for important information about
         # incremental state
         x, extra = self.extract_features(
@@ -657,6 +661,7 @@ class TransformerDecoder(IncrementalDecoder):
             alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
+            token_probs=token_probs,
         )
         if not features_only:
             x = self.output_layer(x)
@@ -672,6 +677,7 @@ class TransformerDecoder(IncrementalDecoder):
         alignment_heads: Optional[int] = None,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        token_probs: Optional[torch.Tensor] = None,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -682,6 +688,7 @@ class TransformerDecoder(IncrementalDecoder):
             alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
+            token_probs=token_probs
         )
 
     def extract_features_scriptable(
@@ -694,6 +701,7 @@ class TransformerDecoder(IncrementalDecoder):
         alignment_heads: Optional[int] = None,
         token_embeddings: Optional[Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
+        token_probs: Optional[torch.Tensor] = None,
     ):
         """
         A scriptable subclass of this class has an extract_features method and calls
@@ -709,10 +717,9 @@ class TransformerDecoder(IncrementalDecoder):
             self.cross_self_attention or prev_output_tokens.eq(self.padding_idx).any()
         ):
             self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
-
         # embed tokens and positions
         x, tok, pos = self.forward_embedding(
-            prev_output_tokens, token_embeddings, incremental_state
+            prev_output_tokens, token_embeddings, token_probs, incremental_state
         )
 
         # see IncrementalDecoder for important information about

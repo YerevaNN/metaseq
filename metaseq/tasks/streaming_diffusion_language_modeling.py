@@ -198,7 +198,6 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         probs = torch.stack([x["probs"] for x in items if x is not None], dim=0)
         timesteps = torch.tensor([x["T"] for x in items if x is not None])
         split = [x["split"] for x in items if x is not None]
-
         # if ids.numel() != torch.unique(ids).numel():
         #     n_duplicate = ids.numel() - torch.unique(ids).numel()
         #     logger.error(
@@ -210,7 +209,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
             "id": ids,
             "net_input": {
                 "src_tokens": input,
-                "probs": probs,
+                "token_probs": probs,
                 "full_context_alignment": torch.all(timesteps > 0).item(),
             },
             "target": target,

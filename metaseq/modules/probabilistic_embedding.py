@@ -2,12 +2,6 @@ import torch
 import torch.nn as nn
 
 
-def partial_projection(probs, embedding_weight, n: int):
-    max_elem, max_elem_ind = torch.topk(probs, n)
-    partial_embed = embedding_weight[max_elem_ind]
-    return max_elem @ partial_embed
-
-
 class ProbabilisticEmbedding(nn.Embedding):
     def __init__(
         self,
@@ -26,9 +20,22 @@ class ProbabilisticEmbedding(nn.Embedding):
             num_embeddings, embedding_dim, padding_idx=padding_idx, _weight=weight
         )
 
-        self.partial_projection = partial_projection
+        self.partial_projection_size = partial_projection
 
     def forward(self, x: torch.Tensor):
-        if self.partial_projection < 0:
+        if self.partial_projection_size < 0:
             return x @ self.weight
-        return partial_projection(x, self.weight, self.partial_projection)
+        return self.partial_projection(x, self.partial_projection_size)
+
+    def partial_projection(self, probs, n: int):
+        values = []
+        for prob in probs:
+            if (prob == 0).long().sum() > n:
+                max_elem, max_elem_ind = torch.topk(prob, 1, dim=-1)
+                values.append(super().forward(max_elem_ind).squeeze())
+            else:
+                max_elem, max_elem_ind = torch.topk(prob, n, dim=-1)
+
+                partial_embed = self.weight[max_elem_ind]
+                values.append((max_elem @ partial_embed)[:, 0])
+        return torch.stack(values)
