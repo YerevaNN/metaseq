@@ -67,6 +67,9 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
         default=20,
         metadata={"help": "maximum number of samples in the buffer"},
     )
+    use_probabilistic_embedding_proj_rank: Optional[int] = field(
+        default=-1, metadata={"help": "Top probabilities to take before projecting"}
+    )
 
 
 @register_task(
@@ -149,6 +152,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
             len(self.source_dictionary),
             split,
             dataset,
+            use_probabilistic_embedding_proj_rank=self.args.use_probabilistic_embedding_proj_rank,
             # We generate blocks with one extra token, so that we have a target
             # for the final input token. This results in slight data loss.
             block_size=self.args.tokens_per_sample + 1,
@@ -180,8 +184,6 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         return self.model
 
     def _collate_fn(self, items: List[Dict[str, Any]]):
-        # print(items)
-        # StreamingTokenBlockDataset returns None as filler\
         if len([x for x in items if x is not None]) == 0:
             return {}
 
@@ -195,21 +197,17 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         target = tokens[:, 1:].contiguous()
 
         ids = torch.cat([torch.tensor([0]) for x in items if x is not None])
-        probs = torch.stack([x["probs"] for x in items if x is not None], dim=0)
+        flattened_prob = torch.stack([x["probs"][0].cpu().detach() for x in items if x is not None])
+        flattened_ind = torch.stack([x["probs"][1].cpu().detach() for x in items if x is not None])
         timesteps = torch.tensor([x["T"] for x in items if x is not None])
         split = [x["split"] for x in items if x is not None]
-        # if ids.numel() != torch.unique(ids).numel():
-        #     n_duplicate = ids.numel() - torch.unique(ids).numel()
-        #     logger.error(
-        #         f"found {n_duplicate}/{ids.numel()} duplicate document IDs in the same batch!"
-        #     )
-
+        
         # metaseq expects batches to have the following structure
         return {
             "id": ids,
             "net_input": {
                 "src_tokens": input,
-                "token_probs": probs,
+                "token_probs": (flattened_prob, flattened_ind),
                 "full_context_alignment": torch.all(timesteps > 0).item(),
             },
             "target": target,

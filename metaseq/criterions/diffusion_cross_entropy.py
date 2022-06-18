@@ -106,7 +106,7 @@ class DiffusionCrossEntropyCriterion(BaseCriterion):
         # Add to replay buffer
         # Figure out a way to pass split
         self.task.datasets[sample["split"][0]].update_buffer_batch(
-            sample["T"] + 1, probs, sample
+            sample["T"], probs.cpu(), sample
         )
 
         lprobs = torch.log(probs)

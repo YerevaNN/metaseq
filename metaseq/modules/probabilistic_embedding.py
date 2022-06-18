@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from typing import Tuple
+
 
 class ProbabilisticEmbedding(nn.Embedding):
     def __init__(
@@ -8,7 +10,6 @@ class ProbabilisticEmbedding(nn.Embedding):
         num_embeddings,
         embedding_dim,
         padding_idx,
-        partial_projection: int = -1,
         initialize_params_on_gpu=False,
     ) -> None:
         device = torch.cuda.current_device() if initialize_params_on_gpu else None
@@ -20,22 +21,13 @@ class ProbabilisticEmbedding(nn.Embedding):
             num_embeddings, embedding_dim, padding_idx=padding_idx, _weight=weight
         )
 
-        self.partial_projection_size = partial_projection
+    def forward(self, x: Tuple[torch.Tensor, torch.Tensor]):
+        flattened_prob, flattened_ind = x
+        flattened_prob = flattened_prob.to(self.weight.device)
+        flattened_ind = flattened_ind.to(self.weight.device)
 
-    def forward(self, x: torch.Tensor):
-        if self.partial_projection_size < 0:
-            return x @ self.weight
-        return self.partial_projection(x, self.partial_projection_size)
-
-    def partial_projection(self, probs, n: int):
-        values = []
-        for prob in probs:
-            if (prob == 0).long().sum() > n:
-                max_elem, max_elem_ind = torch.topk(prob, 1, dim=-1)
-                values.append(super().forward(max_elem_ind).squeeze())
-            else:
-                max_elem, max_elem_ind = torch.topk(prob, n, dim=-1)
-
-                partial_embed = self.weight[max_elem_ind]
-                values.append((max_elem @ partial_embed)[:, 0])
-        return torch.stack(values)
+        flattened_ind_batched = flattened_ind.view(-1, flattened_ind.size(2))
+        flattened_prob_batched = flattened_prob.view(-1, flattened_prob.size(2))
+        mapped = super().forward(flattened_ind_batched) * flattened_prob_batched.unsqueeze(-1)
+        mapped = mapped.sum(1)
+        return mapped.view(flattened_ind.size(0), flattened_ind.size(1), self.weight.size(1))

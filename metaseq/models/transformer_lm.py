@@ -164,9 +164,6 @@ class TransformerLanguageModelConfig(MetaseqDataclass):
         default=False,
         metadata={"help": "Use probabilistic embedding for diffusion models"},
     )
-    use_probabilistic_embedding_proj_rank: Optional[int] = field(
-        default=-1, metadata={"help": "Top probabilities to take before projecting"}
-    )
 
     # options from other parts of the config
     add_bos_token: bool = II("task.add_bos_token")
@@ -223,7 +220,6 @@ class TransformerLanguageModel(LanguageModel):
                 len(dictionary),
                 embed_dim,
                 dictionary.pad(),
-                getattr(args, "use_probabilistic_embedding_proj_rank", -1),
                 initialize_params_on_gpu=getattr(
                     args, "tensor_parallel_init_model_on_gpu", False
                 ),

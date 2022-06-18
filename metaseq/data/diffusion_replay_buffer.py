@@ -18,6 +18,20 @@ def create_delta_distribution(x, y):
         y[i, x[i]] = 1
     return y
 
+
+def create_one_hot_variant(x_ind, n):
+    variant_ind = torch.zeros((len(x_ind), n)).long()
+    variant_prob = torch.zeros((len(x_ind), n)).float()
+    for i in range(len(x_ind)):
+        for y in range(n):
+            variant_ind[i, y] = x_ind[i]
+            if y > 0:
+                variant_prob[i, y] = 0.0
+            else:
+                variant_prob[i, y] = 1.0
+    return variant_prob, variant_ind
+
+
 class BufferStack(list):
     def __init__(self, eviction_policy: str = "random", max_buffer_size: int = 20):
         self.eviction_policy = eviction_policy
@@ -148,6 +162,7 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
         split: str,
         dataset: torch.utils.data.IterableDataset,
         block_size: int,
+        use_probabilistic_embedding_proj_rank: int,
         break_mode: str = "none",
         drop_last: Optional[bool] = False,
         padding_idx: Optional[int] = None,
@@ -174,6 +189,9 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
         )
         self.replay_buffer = defaultdict(buffer_stack)
         self.split = split
+        self.use_probabilistic_embedding_proj_rank = (
+            use_probabilistic_embedding_proj_rank
+        )
 
     def sample_diffusion_step(self):
         return np.random.choice(
@@ -196,35 +214,45 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
 
             T = self.sample_diffusion_step_existing()
             if T == 0:
+                if "block" not in item or len(item["block"]) == 0:
+                    yield None
+                    continue
                 input = item["block"][:-1]
-                delta_dist = torch.zeros(len(input), self.vocab_size)
 
                 yield {
                     "T": 0,
-                    "block": item["block"],
-                    "ids": item["ids"],
-                    "probs": create_delta_distribution(input, delta_dist),
+                    "block": item["block"].clone(),
+                    "ids": item["ids"].clone(),
+                    "probs": create_one_hot_variant(
+                        input, self.use_probabilistic_embedding_proj_rank
+                    ),
                     "split": self.split,
                 }
             else:
                 item_idx = np.random.randint(0, len(self.replay_buffer[T]))
-                item_diff = self.replay_buffer[T][item_idx]
+                item_diff = self.replay_buffer[T].pop(item_idx)
                 yield {
                     "T": T,
-                    "block": item_diff["block"],
-                    "ids": item_diff["ids"],
-                    "probs": (item_diff["probs"]).cpu(),
+                    "block": item_diff["block"].clone(),
+                    "ids": item_diff["ids"].clone(),
+                    "probs": (
+                        item_diff["probs"][0].clone(),
+                        item_diff["probs"][1].clone(),
+                    ),
                     "split": self.split,
                 }
-                del self.replay_buffer[T][item_idx]
 
     def update_buffer_batch(self, T: torch.Tensor, probs: torch.Tensor, item: dict):
-        T_item = T[0].cpu().detach().item()
         for i in range(len(T)):
-            self.replay_buffer[T_item].append(
+            next_T = (T[i] + 1).cpu().item()
+            self.replay_buffer[next_T].append(
                 {
-                    "block": item["block"][i].cpu().detach(),
-                    "ids": item["id"][i].cpu().detach(),
-                    "probs": probs[i].cpu().detach(),
+                    "block": item["block"][i].cpu().clone().detach(),
+                    "ids": item["id"][i].cpu().clone().detach(),
+                    "probs": torch.topk(
+                        probs[i].cpu().clone().detach(),
+                        self.use_probabilistic_embedding_proj_rank,
+                        dim=-1,
+                    ),
                 }
             )
