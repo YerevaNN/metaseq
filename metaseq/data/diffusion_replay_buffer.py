@@ -8,6 +8,7 @@ from typing import List, Optional
 import numpy as np
 import functools
 import torch
+import multiprocessing
 
 from . import BaseWrapperDataset, StreamingTokenBlockDataset
 
@@ -60,109 +61,12 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBuffer(StreamingTokenBlockDat
     def __init__(
         self,
         diffusion_step_probabilities: List[float],
-        embedding_module: torch.nn.Module,
-        split: str,
-        dataset: torch.utils.data.IterableDataset,
-        block_size: int,
-        break_mode: str = "none",
-        drop_last: Optional[bool] = False,
-        padding_idx: Optional[int] = None,
-        shuffle_buffer_size: int = 1,
-        seed: Optional[int] = None,
-        eviction_policy: str = "random",
-        max_buffer_size: int = 20,
-    ):
-        super().__init__(
-            dataset,
-            block_size,
-            break_mode,
-            drop_last,
-            padding_idx,
-            shuffle_buffer_size,
-            seed,
-        )
-        self.diffusion_step_probabilities = diffusion_step_probabilities
-        buffer_stack = functools.partial(
-            BufferStack,
-            eviction_policy=eviction_policy,
-            max_buffer_size=max_buffer_size,
-        )
-        self.replay_buffer = defaultdict(buffer_stack)
-        self.embedding_module = embedding_module
-        self.split = split
-
-    def sample_diffusion_step(self):
-        return np.random.choice(
-            list(range(len(self.diffusion_step_probabilities))),
-            p=self.diffusion_step_probabilities,
-        )
-
-    def sample_diffusion_step_existing(self):
-        T = self.sample_diffusion_step()
-        # TODO (?)
-        while len(self.replay_buffer[T]) == 0 and T > 0:
-            T = self.sample_diffusion_step()
-        return T
-
-    def item_input(self, item, device):
-        x = item[:-1].to(device).unsqueeze(0).contiguous()
-        return x
-
-    def __iter__(self):
-        for item in super().__iter__():
-            if item is None:
-                yield None
-                continue
-
-            T = self.sample_diffusion_step_existing()
-            device = self.embedding_module.weight.device
-            if T == 0:
-                inp = self.item_input(item["block"], device)
-                yield {
-                    "T": 0,
-                    "block": item["block"],
-                    "ids": item["ids"],
-                    "token_embeddings": self.embedding_module(inp).squeeze().cpu(),
-                    "split": self.split,
-                }
-            else:
-                item_idx = np.random.randint(0, len(self.replay_buffer[T]))
-                item_diff = self.replay_buffer[T][item_idx]
-                # TODO: check this logic
-                if self.embedding_module.weight.dtype == torch.float16:
-                    item_diff["probs"] = item_diff["probs"].half()
-                yield {
-                    "T": T,
-                    "block": item_diff["block"],
-                    "ids": item_diff["ids"],
-                    "token_embeddings": (
-                        item_diff["probs"].to(device) @ self.embedding_module.weight
-                    ).cpu(),
-                    "split": self.split,
-                }
-                del self.replay_buffer[T][item_idx]
-
-    def update_buffer_batch(self, T: torch.Tensor, probs: torch.Tensor, item: dict):
-        T_item = T[0].cpu().detach().item()
-        for i in range(len(T)):
-            self.replay_buffer[T_item].append(
-                {
-                    "block": item["block"][i].cpu().detach(),
-                    "ids": item["id"][i].cpu().detach(),
-                    "probs": probs[i].cpu().detach(),
-                }
-            )
-
-
-class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockDataset):
-    def __init__(
-        self,
-        diffusion_step_probabilities: List[float],
         vocab_size: int,
         split: str,
         dataset: torch.utils.data.IterableDataset,
         block_size: int,
         use_probabilistic_embedding_proj_rank: int,
+        replay_buffer,
         break_mode: str = "none",
         drop_last: Optional[bool] = False,
         padding_idx: Optional[int] = None,
@@ -182,16 +86,33 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
         )
         self.diffusion_step_probabilities = diffusion_step_probabilities
         self.vocab_size = vocab_size
-        buffer_stack = functools.partial(
-            BufferStack,
-            eviction_policy=eviction_policy,
-            max_buffer_size=max_buffer_size,
-        )
-        self.replay_buffer = defaultdict(buffer_stack)
+
         self.split = split
         self.use_probabilistic_embedding_proj_rank = (
             use_probabilistic_embedding_proj_rank
         )
+        self.eviction_policy = eviction_policy
+        self.max_buffer_size = max_buffer_size
+        self.replay_buffer = replay_buffer
+
+    @property
+    def max_T(self):
+        return len(self.diffusion_step_probabilities)
+
+    def buffer_append(self, key, value):
+        if self.eviction_policy == "random":
+            return self.buffer_append_random(key, value)
+        # elif self.eviction_policy == "stack":
+        #     return self.append_stack(item)
+        else:
+            raise NotImplementedError(f"unkown eviction_policy: {self.eviction_policy}")
+
+    def buffer_append_random(self, key, value):
+        if len(self.replay_buffer) >= self.max_buffer_size:
+            repl_id = np.random.randint(0, len(self.replay_buffer))
+            self.replay_buffer[repl_id] = value
+        else:
+            self.replay_buffer.append(value)
 
     def sample_diffusion_step(self):
         return np.random.choice(
@@ -200,11 +121,13 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
         )
 
     def sample_diffusion_step_existing(self):
-        T = self.sample_diffusion_step()
+        if len(self.replay_buffer) == 0:
+            return 0
+        return self.sample_diffusion_step()
         # TODO (?)
-        while len(self.replay_buffer[T]) == 0 and T > 0:
-            T = self.sample_diffusion_step()
-        return T
+        # while len(self.replay_buffer[T]) == 0 and T > 0:
+        #    T = self.sample_diffusion_step()
+        # return T
 
     def __iter__(self):
         for item in super().__iter__():
@@ -229,10 +152,10 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
                     "split": self.split,
                 }
             else:
-                item_idx = np.random.randint(0, len(self.replay_buffer[T]))
-                item_diff = self.replay_buffer[T].pop(item_idx)
+                item_idx = np.random.randint(0, len(self.replay_buffer))
+                item_diff = self.replay_buffer.pop(item_idx)
                 yield {
-                    "T": T,
+                    "T": item_diff["T"],
                     "block": item_diff["block"].clone(),
                     "ids": item_diff["ids"].clone(),
                     "probs": (
@@ -245,7 +168,10 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
     def update_buffer_batch(self, T: torch.Tensor, probs: torch.Tensor, item: dict):
         for i in range(len(T)):
             next_T = (T[i] + 1).cpu().item()
-            self.replay_buffer[next_T].append(
+            if next_T >= self.max_T:
+                continue
+            self.buffer_append(
+                next_T,
                 {
                     "block": item["block"][i].cpu().clone().detach(),
                     "ids": item["id"][i].cpu().clone().detach(),
@@ -254,5 +180,5 @@ class StreamingDiffusionTokenBlockDatasetWithReplayBufferV2(StreamingTokenBlockD
                         self.use_probabilistic_embedding_proj_rank,
                         dim=-1,
                     ),
-                }
+                },
             )

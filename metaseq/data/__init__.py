@@ -37,7 +37,6 @@ from .pad_dataset import MultiplePadDataset
 from .shorten_dataset import TruncateDataset
 from .diffusion_replay_buffer import (
     StreamingDiffusionTokenBlockDatasetWithReplayBuffer,
-    StreamingDiffusionTokenBlockDatasetWithReplayBufferV2,
 )
 from .iterators import (
     CountingIterator,
@@ -77,7 +76,6 @@ __all__ = [
     "ShardedIterator",
     "SortDataset",
     "StreamingDiffusionTokenBlockDatasetWithReplayBuffer",
-    "StreamingDiffusionTokenBlockDatasetWithReplayBufferV2",
     "StreamingShuffleDataset",
     "StreamingTokenBlockDataset",
     "StreamingSrcTgtDataset",

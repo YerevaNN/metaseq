@@ -688,7 +688,7 @@ class TransformerDecoder(IncrementalDecoder):
             alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
-            token_probs=token_probs
+            token_probs=token_probs,
         )
 
     def extract_features_scriptable(
