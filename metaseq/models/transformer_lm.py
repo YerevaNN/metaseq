@@ -202,6 +202,7 @@ class TransformerLanguageModel(LanguageModel):
             task.target_dictionary,
             embed_tokens,
             no_encoder_attn=True,
+            task=task
         )
         return cls(decoder)
 

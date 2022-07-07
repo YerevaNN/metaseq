@@ -349,7 +349,7 @@ class TransformerDecoder(IncrementalDecoder):
             (default: False).
     """
 
-    def __init__(self, args, dictionary, embed_tokens, no_encoder_attn=False):
+    def __init__(self, args, dictionary, embed_tokens, no_encoder_attn=False, **kwargs):
         self.args = args
         super().__init__(dictionary)
         self.register_buffer("version", torch.Tensor([3]))
@@ -425,7 +425,7 @@ class TransformerDecoder(IncrementalDecoder):
                 0, len(layers), self.args.fsdp_checkpoint_wrap_layer_frequency
             ):
                 layer_block = TransformerDecoderMultiLayerBlockModule(
-                    layers[i : i + self.args.fsdp_checkpoint_wrap_layer_frequency]
+                    layers[i: i + self.args.fsdp_checkpoint_wrap_layer_frequency]
                 )
                 checkpoint = getattr(args, "checkpoint_activations", False)
                 if checkpoint:

@@ -202,6 +202,10 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
         prev_input = sample["net_input"]
         total_loss = 0
         for T in range(self.task.args.max_T):
+            if self.task.args.step_positioning_policy == "token":
+                positional_tokens = torch.tensor([self.task.step_tokens[T] for _ in range(
+                    prev_input['src_tokens'].shape[0])], device=prev_input["src_tokens"].device).unsqueeze(1)
+                prev_input["src_tokens"] = torch.cat((positional_tokens, prev_input["src_tokens"][:, :-1]), dim=1)
             net_output = model(**prev_input)
             loss, unreduced_loss, probs = self.compute_loss(
                 model, net_output, sample, reduce=reduce
@@ -209,6 +213,8 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
             total_loss = total_loss + loss
             logging_output[f"diff_loss_{T}"] = loss.data
             logging_output[f"diff_loss_{T}_size"] = unreduced_loss.numel()
+            if self.task.args.use_probabilistic_embedding_proj_rank == -1:
+                self.task.args.use_probabilistic_embedding_proj_rank = probs.shape[-1]
             flattened_prob, flattened_ind = torch.topk(
                 probs.detach(),
                 self.task.args.use_probabilistic_embedding_proj_rank,
@@ -217,7 +223,7 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
             prev_input = {
                 "src_tokens": prev_input["src_tokens"],
                 "token_probs": (flattened_prob, flattened_ind),
-                "full_context_alignment": False,
+                "full_context_alignment": self.task.args.full_context_alignment,
             }
         loss = total_loss / self.task.args.max_T
         logging_output["loss"] = loss.data

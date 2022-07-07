@@ -610,6 +610,55 @@ class GroupedIterator(CountingIterator):
             iterable.take(total_num_itrs * chunk_size)
 
 
+class GroupedStreamingIterator(CountingIterator):
+    """Wrapper around an iterable that returns groups (chunks) of items.
+
+    Args:
+        iterable (iterable): iterable to wrap
+        chunk_size (int): size of each chunk
+        skip_remainder_batch (bool, optional): if set, discard the last grouped batch in
+          each training epoch, as the last grouped batch is usually smaller than
+                local_batch_size * distributed_word_size * chunk_size (default: ``False``).
+    Attributes:
+        n (int): number of elements consumed from this iterator
+    """
+
+    def __init__(self, iterable, chunk_size, skip_remainder_batch=False):
+        if skip_remainder_batch:
+            total_num_itrs = int(math.floor(len(iterable) / float(chunk_size)))
+            logger.info(
+                f"skip final residual batch, grouped total_num_itrs = {total_num_itrs}"
+            )
+        else:
+            total_num_itrs = int(math.ceil(len(iterable) / float(chunk_size)))
+            logger.info(f"grouped total_num_itrs = {total_num_itrs}")
+
+        self.stream_iterable = iterable
+        itr = _chunk_iterator(iterable, chunk_size, skip_remainder_batch)
+        super().__init__(
+            itr,
+            start=int(math.ceil(getattr(iterable, "n", 0) / float(chunk_size))),
+            total=total_num_itrs,
+        )
+        self.chunk_size = chunk_size
+
+        if skip_remainder_batch:
+            self.take(total_num_itrs)
+            # TODO: [Hack] Here the grouped iterator modifies the base iterator size so that
+            # training can move into the next epoch once the grouped iterator is exhausted.
+            # Double-check this implementation in case unexpected behavior occurs.
+            iterable.take(total_num_itrs * chunk_size)
+
+    def __iter__(self):
+        for x in self.iterable:
+            self.n += 1
+            yield x
+
+    def has_next(self):
+        """Whether the iterator has been exhausted."""
+        return bool(self.stream_iterable._peekable_itr)
+
+
 def _chunk_iterator(itr, chunk_size, skip_remainder_batch=False):
     chunk = []
     for x in itr:

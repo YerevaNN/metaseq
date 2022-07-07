@@ -73,6 +73,12 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
     use_probabilistic_embedding_proj_rank: Optional[int] = field(
         default=-1, metadata={"help": "Top probabilities to take before projecting"}
     )
+    full_context_alignment: Optional[bool] = field(
+        default=False, metadata={"help": "Use full context aligment or not"}
+    )
+    step_positioning_policy: Optional[str] = field(
+        default="", metadata={"help": "Diffusion step positioning policy: token, embedding, none"}
+    )
 
 
 @register_task(
@@ -90,4 +96,23 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         tokenizer (tokenizers.ByteLevelBPETokenizer): the BPE tokenizer to use
     """
 
-    pass
+    def __init__(self, args):
+        super().__init__(args)
+        self._initialize_metaseq_dictionary(args)
+
+    def _initialize_metaseq_dictionary(self, args):
+        if args.step_positioning_policy == "token":
+            self.step_tokens = []
+            for t in range(args.max_T):
+                self.step_tokens.append(self.dictionary.add_symbol(f"diff:{t}"))
+
+            final_vocab_size = args.final_vocab_size
+            # final_vocab_size = 51200 for roberta dictionary
+            if final_vocab_size is not None:
+                if final_vocab_size < tok_vocab_size:
+                    raise ValueError(
+                        f"incompatible: {final_vocab_size}, tok_vocab_size: {tok_vocab_size}"
+                    )
+                self.dictionary.pad_to_multiple_(final_vocab_size)
+            else:
+                self.dictionary.pad_to_multiple_(8)
