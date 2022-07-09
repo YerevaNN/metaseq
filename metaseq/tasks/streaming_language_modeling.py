@@ -167,7 +167,7 @@ class StreamingLanguageModelingTask(LegacyTask):
 
     @classmethod
     def setup_task(cls, args, **kwargs):
-        return cls(args)
+        return cls(args, **kwargs)
 
     def _tokenize_one_json(self, json):
         text = json["text"]

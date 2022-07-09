@@ -12,6 +12,7 @@ import functools
 import logging
 import multiprocessing
 import os
+from metaseq import utils
 from argparse import Namespace
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,9 @@ from metaseq.tasks.streaming_language_modeling import (
     StreamingLanguageModelingConfig,
     StreamingLanguageModelingTask,
 )
+
+from metaseq.models.transformer import PositionalEmbedding
+
 from omegaconf import II
 
 try:
@@ -79,6 +83,12 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
     step_positioning_policy: Optional[str] = field(
         default="", metadata={"help": "Diffusion step positioning policy: token, embedding, none"}
     )
+    step_positioning_embedding_learned: Optional[bool] = field(
+        default=False, metadata={"help": "Diffusion step PositionalEmbedding learned"}
+    )
+    step_positioning_embedding_learned_sinusoidal: Optional[bool] = field(
+        default=False, metadata={"help": "Diffusion step PositionalEmbedding learned_sinusoidal"}
+    )
 
 
 @register_task(
@@ -96,23 +106,49 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
         tokenizer (tokenizers.ByteLevelBPETokenizer): the BPE tokenizer to use
     """
 
-    def __init__(self, args):
+    def __init__(self, args, **kwargs):
         super().__init__(args)
-        self._initialize_metaseq_dictionary(args)
+        if args.step_positioning_policy == "token":
+            self._initialize_metaseq_dictionary(args)
+        elif args.step_positioning_policy == "embedding":
+            self.cfg_model = kwargs["cfg_model"]
+            self._initialize_step_embeddings(args)
 
     def _initialize_metaseq_dictionary(self, args):
-        if args.step_positioning_policy == "token":
-            self.step_tokens = []
-            for t in range(args.max_T):
-                self.step_tokens.append(self.dictionary.add_symbol(f"diff:{t}"))
+        self.step_tokens = []
+        for t in range(args.max_T):
+            self.step_tokens.append(self.dictionary.add_symbol(f"diff:{t}"))
 
-            final_vocab_size = args.final_vocab_size
-            # final_vocab_size = 51200 for roberta dictionary
-            if final_vocab_size is not None:
-                if final_vocab_size < tok_vocab_size:
-                    raise ValueError(
-                        f"incompatible: {final_vocab_size}, tok_vocab_size: {tok_vocab_size}"
-                    )
-                self.dictionary.pad_to_multiple_(final_vocab_size)
-            else:
-                self.dictionary.pad_to_multiple_(8)
+        final_vocab_size = args.final_vocab_size
+        # final_vocab_size = 51200 for roberta dictionary
+        if final_vocab_size is not None:
+            if final_vocab_size < tok_vocab_size:
+                raise ValueError(
+                    f"incompatible: {final_vocab_size}, tok_vocab_size: {tok_vocab_size}"
+                )
+            self.dictionary.pad_to_multiple_(final_vocab_size)
+        else:
+            self.dictionary.pad_to_multiple_(8)
+
+    def _initialize_step_embeddings(self, args):
+        self.step_embeddings = []
+        for t in range(args.max_T):
+            positional_embedding = PositionalEmbedding(len(self.dictionary),
+                                                       self.cfg_model.decoder_input_dim,
+                                                       self.dictionary.pad(),
+                                                       learned=args.step_positioning_embedding_learned,
+                                                       learned_sinusoidal=args.step_positioning_embedding_learned_sinusoidal
+                                                       )
+
+            initialize_params_on_gpu = getattr(
+                self.cfg_model, "tensor_parallel_init_model_on_gpu", False
+            )
+            if initialize_params_on_gpu:
+                positional_embedding = utils.floating_point_precision_convertor(
+                    positional_embedding.cuda(),
+                    fp16=getattr(args, "fp16", False),
+                    memory_efficient_fp16=getattr(args, "memory_efficient_fp16", False),
+                    bf16=getattr(args, "bf16", False),
+                )
+
+            self.step_embeddings.append(positional_embedding)

@@ -87,8 +87,9 @@ def main(cfg: DictConfig) -> None:
             )
             return
 
+    # HACK (tmyn) - added cfg_model for positional embeddings
     # Setup task, e.g., translation, language modeling, etc.
-    task = tasks.setup_task(cfg.task)
+    task = tasks.setup_task(cfg.task, cfg_model=cfg.model)
 
     assert cfg.criterion, "Please specify criterion to train a model"
 

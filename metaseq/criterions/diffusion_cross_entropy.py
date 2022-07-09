@@ -206,6 +206,8 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
                 positional_tokens = torch.tensor([self.task.step_tokens[T] for _ in range(
                     prev_input['src_tokens'].shape[0])], device=prev_input["src_tokens"].device).unsqueeze(1)
                 prev_input["src_tokens"] = torch.cat((positional_tokens, prev_input["src_tokens"][:, :-1]), dim=1)
+            elif self.task.args.step_positioning_policy == "embedding":
+                prev_input["diff_embed_positions"] = self.task.step_embeddings[T]
             net_output = model(**prev_input)
             loss, unreduced_loss, probs = self.compute_loss(
                 model, net_output, sample, reduce=reduce
