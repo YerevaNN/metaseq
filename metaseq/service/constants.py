@@ -14,7 +14,7 @@ TOTAL_WORLD_SIZE = 8
 
 
 try:
-    from metaseq_internal.constants import LOCAL_SSD, MODEL_SHARED_FOLDER
+    from metaseq_internal.constants import *
 except ModuleNotFoundError:
     # MODEL_SHARED_FOLDER should point to a shared drive (e.g. NFS) where the
     # checkpoints from S3 are stored. As an example:
@@ -41,13 +41,14 @@ except ModuleNotFoundError:
         )
 
 # tokenizer files
-BPE_MERGES = os.path.join(MODEL_SHARED_FOLDER, "gpt2-merges.txt")
-BPE_VOCAB = os.path.join(MODEL_SHARED_FOLDER, "gpt2-vocab.json")
+BPE_MERGES = os.path.join(BPE_DIR, "bpe-merges.txt")
+BPE_VOCAB = os.path.join(BPE_DIR, "bpe-vocab.json")
 
 # where to find the raw files on nfs
-CHECKPOINT_FOLDER = os.path.join(MODEL_SHARED_FOLDER, "175B", "reshard_no_os")
+CHECKPOINT_FOLDER = os.path.join(MODEL_SHARED_FOLDER, "reshard_no_os")
 # where to store them on SSD for faster loading
-CHECKPOINT_LOCAL = os.path.join(LOCAL_SSD, "175B", "reshard_no_os", "reshard.pt")
+# CHECKPOINT_LOCAL = os.path.join(LOCAL_SSD, "reshard_no_os", "reshard.pt")
+CHECKPOINT_LOCAL = os.path.join(LOCAL_SSD, CHECKPOINT)
 
 LAUNCH_ARGS = [
     f"--model-parallel-size {MODEL_PARALLEL}",
