@@ -89,13 +89,10 @@ def main(cfg: DictConfig) -> None:
     task = tasks.setup_task(cfg.task)
 
     model = TransformerLanguageModel.from_pretrained(
-        cfg.checkpoint.save_dir,
-        checkpoint_file="checkpoint_last.pt",
-        bpe="gpt2"
+        cfg.checkpoint.save_dir, checkpoint_file="checkpoint_last.pt", bpe="gpt2"
     ).models[0]
     model.eval()
     model = model.to(torch.cuda.current_device())
-
 
     # TODO(tmyn) check this
     # model.generate
@@ -122,14 +119,19 @@ def generate(cfg, task, model, trainer, tmp_dest, tmp_dir, prompt=None):
         json.dump(sample_dict, f)
 
     task.load_dataset(tmp_dir)
-    itr_valid = trainer.get_valid_iterator(tmp_dir).next_epoch_itr(shuffle=False, set_dataset_epoch=False)
+    itr_valid = trainer.get_valid_iterator(tmp_dir).next_epoch_itr(
+        shuffle=False, set_dataset_epoch=False
+    )
 
     sample = next(itr_valid)
     sample = _move_to(sample, torch.cuda.current_device())
     output, _ = model(**sample["net_input"])
 
-    current_idx = [i for i, idx in enumerate(sample['net_input']['src_tokens'].squeeze(
-        0).tolist()) if idx != task.dictionary.pad()][-1]
+    current_idx = [
+        i
+        for i, idx in enumerate(sample["net_input"]["src_tokens"].squeeze(0).tolist())
+        if idx != task.dictionary.pad()
+    ][-1]
     logits = output[:, current_idx, :]
 
     if cfg.criterion.decoding == "greedy":
@@ -137,7 +139,15 @@ def generate(cfg, task, model, trainer, tmp_dest, tmp_dir, prompt=None):
         print(f"generated text: {prompt} {next_token}", end="\r")
         stop_generate = input()
         if not stop_generate:
-            generate(cfg, task, model, trainer, tmp_dest, tmp_dir, prompt=f"{prompt} {next_token}")
+            generate(
+                cfg,
+                task,
+                model,
+                trainer,
+                tmp_dest,
+                tmp_dir,
+                prompt=f"{prompt} {next_token}",
+            )
     else:
         raise NotImplementedError(f"decoding method {cfg.criterion.decoding}")
 

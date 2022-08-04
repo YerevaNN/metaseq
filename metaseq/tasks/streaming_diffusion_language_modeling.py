@@ -81,13 +81,15 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
         default=False, metadata={"help": "Use full context aligment or not"}
     )
     step_positioning_policy: Optional[str] = field(
-        default="", metadata={"help": "Diffusion step positioning policy: token, embedding, none"}
+        default="",
+        metadata={"help": "Diffusion step positioning policy: token, embedding, none"},
     )
     step_positioning_embedding_learned: Optional[bool] = field(
         default=False, metadata={"help": "Diffusion step PositionalEmbedding learned"}
     )
     step_positioning_embedding_learned_sinusoidal: Optional[bool] = field(
-        default=False, metadata={"help": "Diffusion step PositionalEmbedding learned_sinusoidal"}
+        default=False,
+        metadata={"help": "Diffusion step PositionalEmbedding learned_sinusoidal"},
     )
 
 
@@ -133,12 +135,13 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
     def _initialize_step_embeddings(self, args):
         self.step_embeddings = []
         for t in range(args.max_T):
-            positional_embedding = PositionalEmbedding(len(self.dictionary),
-                                                       self.cfg_model.decoder_input_dim,
-                                                       self.dictionary.pad(),
-                                                       learned=args.step_positioning_embedding_learned,
-                                                       learned_sinusoidal=args.step_positioning_embedding_learned_sinusoidal
-                                                       )
+            positional_embedding = PositionalEmbedding(
+                len(self.dictionary),
+                self.cfg_model.decoder_input_dim,
+                self.dictionary.pad(),
+                learned=args.step_positioning_embedding_learned,
+                learned_sinusoidal=args.step_positioning_embedding_learned_sinusoidal,
+            )
 
             initialize_params_on_gpu = getattr(
                 self.cfg_model, "tensor_parallel_init_model_on_gpu", False

@@ -180,11 +180,7 @@ class TransformerLanguageModel(LanguageModel):
             args, task.source_dictionary, args.decoder_input_dim
         )
         decoder = TransformerDecoder(
-            args,
-            task.target_dictionary,
-            embed_tokens,
-            no_encoder_attn=True,
-            task=task
+            args, task.target_dictionary, embed_tokens, no_encoder_attn=True, task=task
         )
         return cls(decoder)
 

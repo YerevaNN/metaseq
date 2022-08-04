@@ -28,9 +28,6 @@ def get_progress_bar(
     aim_param_checkpoint_dir: Optional[str] = None,
     wandb_project: Optional[str] = None,
     wandb_run_name: Optional[str] = None,
-    aim_repo: Optional[str] = None,
-    aim_run_hash: Optional[str] = None,
-    aim_param_checkpoint_dir: Optional[str] = None,
 ):
     if log_file is not None:
         handler = logging.FileHandler(filename=log_file)

@@ -323,7 +323,7 @@ class TransformerDecoder(IncrementalDecoder):
                 0, len(layers), self.args.fsdp_checkpoint_wrap_layer_frequency
             ):
                 layer_block = TransformerDecoderMultiLayerBlockModule(
-                    layers[i: i + self.args.fsdp_checkpoint_wrap_layer_frequency]
+                    layers[i : i + self.args.fsdp_checkpoint_wrap_layer_frequency]
                 )
                 checkpoint = getattr(args, "checkpoint_activations", False)
                 if checkpoint:
@@ -652,7 +652,11 @@ class TransformerDecoder(IncrementalDecoder):
             self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
         # embed tokens and positions
         x, tok, pos = self.forward_embedding(
-            prev_output_tokens, token_embeddings, token_probs, diff_embed_positions, incremental_state
+            prev_output_tokens,
+            token_embeddings,
+            token_probs,
+            diff_embed_positions,
+            incremental_state,
         )
 
         # see IncrementalDecoder for important information about

@@ -20,7 +20,11 @@ def extract_json(in_path: str, out_path: str, train_ratio: float):
     os.makedirs(out_path, exist_ok=True)
     out_path = Path(out_path)
 
-    with open(in_path, "r") as in_file, open(out_path.joinpath(f"train/00/a.jsonl"), "w") as out_train_file, open(out_path.joinpath(f"valid/00/a.jsonl"), "w") as out_valid_file:
+    with open(in_path, "r") as in_file, open(
+        out_path.joinpath("train/00/a.jsonl"), "w"
+    ) as out_train_file, open(
+        out_path.joinpath("valid/00/a.jsonl"), "w"
+    ) as out_valid_file:
         for line in tqdm(in_file):
             prob_train = random.uniform(0, 1)
             if prob_train < train_ratio:
@@ -29,13 +33,12 @@ def extract_json(in_path: str, out_path: str, train_ratio: float):
                 out_valid_file.write(line)
 
 
-parser = argparse.ArgumentParser(description='Extract a .jsonl file')
-parser.add_argument('in_path', type=str,
-                    help='input file (.jsonl) path')
-parser.add_argument('--out_path', type=str,
-                    help='output file path')
-parser.add_argument('--train_ratio', type=float, default=0.9,
-                    help='portion of the set to keep')
+parser = argparse.ArgumentParser(description="Extract a .jsonl file")
+parser.add_argument("in_path", type=str, help="input file (.jsonl) path")
+parser.add_argument("--out_path", type=str, help="output file path")
+parser.add_argument(
+    "--train_ratio", type=float, default=0.9, help="portion of the set to keep"
+)
 
 args = parser.parse_args()
 
