@@ -74,9 +74,13 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
         default=200,
         metadata={"help": "maximum number of samples in the buffer"},
     )
-    use_probabilistic_embedding_proj_rank: Optional[int] = field(
+    use_probabilistic_embedding_proj_rank_min: Optional[int] = field(
         default=-1, metadata={"help": "Top probabilities to take before projecting"}
     )
+    use_probabilistic_embedding_proj_rank_max: Optional[int] = field(
+        default=-1, metadata={"help": "Top probabilities to take before projecting"}
+    )
+
     full_context_alignment: Optional[bool] = field(
         default=False, metadata={"help": "Use full context aligment or not"}
     )
@@ -123,6 +127,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
 
         final_vocab_size = args.final_vocab_size
         # final_vocab_size = 51200 for roberta dictionary
+        # TODO: Hov
         if final_vocab_size is not None:
             if final_vocab_size < tok_vocab_size:
                 raise ValueError(
