@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 
 from metaseq.dataclass.configs import DistributedTrainingConfig
-from metaseq.distributed import utils as dist_utils
+from metaseq.distributed import utils as distributed_utils
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,12 @@ class FullyShardedDataParallel(FSDP):
                 super().state_dict()
                 return destination or {}
 
-    def load_state_dict(self, state_dict, strict=True, model_cfg=None):
+    def load_state_dict(self, state_dict, strict=True):
         if self.use_sharded_state:
             return super().load_local_state_dict(state_dict, strict=strict)
         else:
             if not isinstance(self.process_group, DummyProcessGroup):
-                state_dict = dist_utils.broadcast_object(
+                state_dict = distributed_utils.broadcast_object(
                     state_dict, src_rank=0, group=self.process_group
                 )
             return super().load_state_dict(state_dict, strict=strict)
@@ -95,7 +95,7 @@ def fsdp_enable_wrap(
         )
     if cfg.memory_efficient_fp16:
         assert cfg.fp16  # memory_efficient_fp16 should imply fp16
-    group = dist_utils.get_data_parallel_group()
+    group = distributed_utils.get_data_parallel_group()
     if group is None and cfg.distributed_world_size == 1:
         group = DummyProcessGroup(rank=0, size=1)
     if cfg.fp16:

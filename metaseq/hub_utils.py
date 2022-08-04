@@ -11,6 +11,7 @@ import os
 import time
 from argparse import Namespace
 from typing import Any, Dict, Iterator, List, Optional
+from tokenizers import ByteLevelBPETokenizer
 
 import numpy as np
 import torch
@@ -101,6 +102,27 @@ def from_pretrained(
         "task": task,
         "models": models,
     }
+
+
+def tensorize_input(tokenizer, prompt):
+    input_ids = torch.LongTensor(tokenizer.encode(prompt).ids).unsqueeze(0)
+    input_ids = torch.cat([torch.tensor([[0]]), input_ids], dim=-1)
+    input_ids = input_ids
+    return input_ids
+
+
+def get_next_token(logits, tokenizer):
+    pred_next_token = torch.argmax(logits[0, -1], -1)
+    next_token = tokenizer.decode([pred_next_token])
+    next_token = next_token[0].replace("Ġ", "")
+    return next_token
+
+
+def setup_vocab_and_merges(model_path):
+    vocab_file = os.path.join(model_path, "gpt2-vocab.json")
+    merges_file = os.path.join(model_path, "gpt2-merges.txt")
+    tokenizer = ByteLevelBPETokenizer.from_file(vocab_file, merges_file)
+    return vocab_file, merges_file, tokenizer
 
 
 class GeneratorHubInterface(nn.Module):
@@ -471,7 +493,7 @@ class GeneratorInterface:
         task = tasks.setup_task(self.cfg.task)
 
         def _build_model(cfg, task):
-            model = task.build_model(cfg.model).half().cuda()
+            model = task.build_model(cfg.model).cuda()
             model.make_generation_fast_()
             return fsdp_wrap(model)
 
@@ -504,6 +526,16 @@ class GeneratorInterface:
         self.models = models
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
+
+        # store special token indices for
+        self._pad_token_ind = self.tgt_dict.pad_index
+        self._special_token_inds = {
+            self.tgt_dict.eos_index,
+            self.tgt_dict.pad_index,
+            self.tgt_dict.bos_index,
+            self.tgt_dict.unk_index,
+        }
+
         return models
 
     def generate(
@@ -553,8 +585,12 @@ class GeneratorInterface:
         self.cfg.generation.beam = best_of
         if temperature > 0:
             self.cfg.generation.temperature = temperature
-        else:
+        elif temperature == 0:
+            self.cfg.generation.sampling = False
             self.cfg.generation.temperature = 1.0
+            self.cfg.generation.sampling_topp = -1
+        elif temperature < 0:
+            raise ValueError("temperature must be >= 0 and <= 1")
 
         MAX_SEQ_LEN = utils.resolve_max_positions(
             self.task.max_positions(), *[model.max_positions() for model in self.models]
@@ -591,8 +627,11 @@ class GeneratorInterface:
             self.cfg.generation.max_len_a = 0
 
             logger.info(f"Preparing generator with settings {self.cfg.generation}")
+            need_logprobs = True if logprobs > 0 else False
             generator = self.task.build_generator(
-                self.models, self.cfg.generation, extra_gen_cls_kwargs={"stop": stop}
+                self.models,
+                self.cfg.generation,
+                extra_gen_cls_kwargs={"stop": stop, "need_logprobs": need_logprobs},
             )
 
             # okay actually generate
@@ -602,57 +641,58 @@ class GeneratorInterface:
 
             translate_start_time = time.time()
             translations = self.task.inference_step(generator, self.models, batch)
-
             translate_time = time.time() - translate_start_time
             total_generation_time += translate_time
 
-            # possibly cut off any bsz padding we did
-            translations = translations[: len(inputs)]
-            # actually turn everything into strings
-            for i in range(len(translations)):
-                decoding = translations[i]
-                beams = []
-                for beam in decoding:
-                    # first beam is always the highest scoring
-                    tokens = beam["tokens"].tolist()  # implicit move to cpu
-                    scores = beam["positional_scores"].tolist()
-                    if logprobs > 0:
-                        distributions = beam["distributions"].cpu()
-                    else:
-                        distributions = None
+            all_tokens = translations["tokens"].cpu()[: len(inputs)]
+            all_scores = translations["scores"].cpu()[: len(inputs)]
+            if logprobs > 0:
+                all_distributions = translations["distributions"].cpu()[: len(inputs)]
+            else:
+                all_distributions = None
 
-                    tokens, scores, distributions = GeneratorInterface._filter_special(
+            # actually turn everything into strings
+            for i in range(all_tokens.size(0)):
+                beams = []
+                for j in range(best_of):
+                    # first beam is always the highest scoring
+                    tokens = all_tokens[i, j].tolist()
+                    scores = all_scores[i, j].tolist()
+                    distributions = all_distributions[i, j] if logprobs > 0 else None
+
+                    prompt_len = lengths[i]
+
+                    tokens, scores, distributions = self._filter_special(
                         tokens, scores, distributions
                     )
-                    prompt_len = src_lengths[i]
+
                     if echo:
                         # don't cut off prompt
-                        tokens = tokens[: prompt_len + max_tokens[i] - 1]
-                        scores = scores[: prompt_len + max_tokens[i] - 1]
-                        if logprobs > 0:
-                            distributions = distributions[
-                                : prompt_len + max_tokens[i] - 1
-                            ]
+                        pass
                     else:
                         # cut off prompt
-                        tokens = tokens[prompt_len - 1 :][: max_tokens[i]]
-                        scores = scores[prompt_len - 1 :][: max_tokens[i]]
+                        tokens = tokens[prompt_len + 1 :][: max_tokens[i]]
+                        scores = scores[prompt_len + 1 :][: max_tokens[i]]
                         if logprobs > 0:
-                            distributions = distributions[prompt_len - 1 :][
+                            distributions = distributions[prompt_len + 1 :][
                                 : max_tokens[i]
                             ]
+
+                    # cut off the starting token
+                    tokens_no_eos = tokens[1:] if echo else tokens
+                    scores_with_eos = [None] + scores[1:] if echo else scores
                     # turn it into a string
-                    text = self.bpe.bpe.decode(tokens)
+                    text = self.bpe.bpe.decode(tokens_no_eos)
                     # re-encode it so we get offsets
                     token_offsets = [s for s, e in self.bpe.bpe.encode(text).offsets]
 
                     result = {
-                        "text": self.bpe.bpe.decode(tokens),
+                        "text": text,
                         "tokens": [self.bpe.bpe.decode([t]) for t in tokens],
                         # text offset is useful for cutting off prompts or prefixes
                         # or evaluating PPL on just a subset of tokens
                         "text_offset": token_offsets,
-                        "token_scores": scores,
+                        "token_scores": scores_with_eos,
                     }
                     if logprobs > 0:
                         # final result is a List[Dict[str, float]]
@@ -669,7 +709,12 @@ class GeneratorInterface:
                                 for t, s in zip(top_toks, top_scores)
                             }
                             out_logprobs.append(lp)
-                        result["top_logprobs"] = out_logprobs
+                        if echo:
+                            # use null instead of giving bunk probs for EOS token
+                            result["top_logprobs"] = [None] + out_logprobs[1:]
+                        else:
+                            result["top_logprobs"] = out_logprobs
+
                     else:
                         result["top_logprobs"] = None
 
@@ -683,12 +728,11 @@ class GeneratorInterface:
         )
         return retval
 
-    @staticmethod
     def _filter_special(
+        self,
         tokens: List[int],
         scores: List[float],
         distributions,
-        pad_token: int = 1,
     ):
         """
         Cut off tokens after finding a special tokens.
@@ -698,16 +742,16 @@ class GeneratorInterface:
         # scores is a 1D list of log-probability scores for those tokens (length seqlen)
         # distributions (optional) is a seqlen x vocab_size tensor corresponding to
         # the full distribution of predictions at each timestep
-
         output = []
         mask = []
-        for t, s in zip(tokens, scores):
-            if t == pad_token:
+        for i, (t, s) in enumerate(zip(tokens, scores)):
+            if t == self._pad_token_ind:
                 # simply skip pads
                 mask.append(False)
                 continue
-            if t <= 3:
+            if t in self._special_token_inds and i > 0:
                 # and other special tokens should end things
+                mask.append(False)
                 break
             mask.append(True)
             output.append((t, s))
@@ -715,6 +759,5 @@ class GeneratorInterface:
 
         # cut off at stop and drop pads
         if distributions is not None:
-            distributions = distributions[: len(mask)][mask]
-            distributions = distributions[: len(output)]
-        return new_tokens, new_scores, distributions
+            distributions = distributions[mask]
+        return list(new_tokens), list(new_scores), distributions

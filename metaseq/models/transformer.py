@@ -11,14 +11,15 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from metaseq.dataclass.constants import UNSPECIFIED_DOC_SEP
+
 from metaseq import utils
-from metaseq.distributed import utils as dist_utils, fsdp_wrap
+from metaseq.distributed import utils as distributed_utils, fsdp_wrap
 from metaseq.models import BaseEncoder, IncrementalDecoder
 from metaseq.modules import (
     Dropout,
     LayerNorm,
     PositionalEmbedding,
-    SinusoidalPositionalEmbedding,
     TransformerDecoderLayer,
     TransformerEncoderLayer,
 )
@@ -53,9 +54,7 @@ class TransformerEncoder(BaseEncoder):
         embed_dim = embed_tokens.embedding_dim
         self.padding_idx = embed_tokens.padding_idx
         self.max_source_positions = args.max_source_positions
-
         self.embed_tokens = embed_tokens
-
         self.embed_scale = 1.0 if args.no_scale_embedding else math.sqrt(embed_dim)
 
         self.embed_positions = (
@@ -102,7 +101,7 @@ class TransformerEncoder(BaseEncoder):
         layer = fsdp_wrap(
             layer,
             min_num_params=min_params_to_wrap,
-            process_group=dist_utils.get_data_parallel_group(),
+            process_group=distributed_utils.get_data_parallel_group(),
         )
         return layer
 
@@ -122,7 +121,6 @@ class TransformerEncoder(BaseEncoder):
         self,
         src_tokens,
         src_lengths: Optional[torch.Tensor] = None,
-        return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
     ):
         """
@@ -131,8 +129,6 @@ class TransformerEncoder(BaseEncoder):
                 `(batch, src_len)`
             src_lengths (torch.LongTensor): lengths of each source sentence of
                 shape `(batch)`
-            return_all_hiddens (bool, optional): also return all of the
-                intermediate hidden states (default: False).
             token_embeddings (torch.Tensor, optional): precomputed embeddings
                 default `None` will recompute embeddings
 
@@ -144,13 +140,8 @@ class TransformerEncoder(BaseEncoder):
                   padding elements of shape `(batch, src_len)`
                 - **encoder_embedding** (Tensor): the (scaled) embedding lookup
                   of shape `(batch, src_len, embed_dim)`
-                - **encoder_states** (List[Tensor]): all intermediate
-                  hidden states of shape `(src_len, batch, embed_dim)`.
-                  Only populated if *return_all_hiddens* is True.
         """
-        return self.forward_scriptable(
-            src_tokens, src_lengths, return_all_hiddens, token_embeddings
-        )
+        return self.forward_scriptable(src_tokens, src_lengths, token_embeddings)
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
     # can't access the base class model in Torchscript.
@@ -160,7 +151,6 @@ class TransformerEncoder(BaseEncoder):
         self,
         src_tokens,
         src_lengths: Optional[torch.Tensor] = None,
-        return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
     ):
         """
@@ -169,8 +159,6 @@ class TransformerEncoder(BaseEncoder):
                 `(batch, src_len)`
             src_lengths (torch.LongTensor): lengths of each source sentence of
                 shape `(batch)`
-            return_all_hiddens (bool, optional): also return all of the
-                intermediate hidden states (default: False).
             token_embeddings (torch.Tensor, optional): precomputed embeddings
                 default `None` will recompute embeddings
 
@@ -182,9 +170,6 @@ class TransformerEncoder(BaseEncoder):
                   padding elements of shape `(batch, src_len)`
                 - **encoder_embedding** (Tensor): the (scaled) embedding lookup
                   of shape `(batch, src_len, embed_dim)`
-                - **encoder_states** (List[Tensor]): all intermediate
-                  hidden states of shape `(src_len, batch, embed_dim)`.
-                  Only populated if *return_all_hiddens* is True.
         """
         # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
@@ -199,20 +184,12 @@ class TransformerEncoder(BaseEncoder):
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
-        encoder_states = []
-
-        if return_all_hiddens:
-            encoder_states.append(x)
-
         # encoder layers
         l_aux = []
         for layer in self.layers:
             x, l_aux_i = layer(
                 x, encoder_padding_mask=encoder_padding_mask if has_pads else None
             )
-            if return_all_hiddens:
-                assert encoder_states is not None
-                encoder_states.append(x)
             l_aux.append(l_aux_i)
 
         if self.layer_norm is not None:
@@ -226,63 +203,9 @@ class TransformerEncoder(BaseEncoder):
             "encoder_out": [x],  # T x B x C
             "encoder_padding_mask": [encoder_padding_mask],  # B x T
             "encoder_embedding": [encoder_embedding],  # B x T x C
-            "encoder_states": encoder_states,  # List[T x B x C]
             "src_tokens": [],
             "src_lengths": [],
             "l_aux": l_aux,
-        }
-
-    @torch.jit.export
-    def reorder_encoder_out(self, encoder_out: Dict[str, List[Tensor]], new_order):
-        """
-        Reorder encoder output according to *new_order*.
-
-        Args:
-            encoder_out: output from the ``forward()`` method
-            new_order (LongTensor): desired order
-
-        Returns:
-            *encoder_out* rearranged according to *new_order*
-        """
-        if len(encoder_out["encoder_out"]) == 0:
-            new_encoder_out = []
-        else:
-            new_encoder_out = [encoder_out["encoder_out"][0].index_select(1, new_order)]
-        if len(encoder_out["encoder_padding_mask"]) == 0:
-            new_encoder_padding_mask = []
-        else:
-            new_encoder_padding_mask = [
-                encoder_out["encoder_padding_mask"][0].index_select(0, new_order)
-            ]
-        if len(encoder_out["encoder_embedding"]) == 0:
-            new_encoder_embedding = []
-        else:
-            new_encoder_embedding = [
-                encoder_out["encoder_embedding"][0].index_select(0, new_order)
-            ]
-
-        if len(encoder_out["src_tokens"]) == 0:
-            src_tokens = []
-        else:
-            src_tokens = [(encoder_out["src_tokens"][0]).index_select(0, new_order)]
-
-        if len(encoder_out["src_lengths"]) == 0:
-            src_lengths = []
-        else:
-            src_lengths = [(encoder_out["src_lengths"][0]).index_select(0, new_order)]
-
-        encoder_states = encoder_out["encoder_states"]
-        if len(encoder_states) > 0:
-            for idx, state in enumerate(encoder_states):
-                encoder_states[idx] = state.index_select(1, new_order)
-
-        return {
-            "encoder_out": new_encoder_out,  # T x B x C
-            "encoder_padding_mask": new_encoder_padding_mask,  # B x T
-            "encoder_embedding": new_encoder_embedding,  # B x T x C
-            "encoder_states": encoder_states,  # List[T x B x C]
-            "src_tokens": src_tokens,  # B x T
-            "src_lengths": src_lengths,  # B x 1
         }
 
     def max_positions(self):
@@ -290,30 +213,6 @@ class TransformerEncoder(BaseEncoder):
         if self.embed_positions is None:
             return self.max_source_positions
         return min(self.max_source_positions, self.embed_positions.max_positions)
-
-    def upgrade_state_dict_named(self, state_dict, name):
-        """Upgrade a (possibly old) state dict for new versions of metaseq."""
-        if isinstance(self.embed_positions, SinusoidalPositionalEmbedding):
-            weights_key = "{}.embed_positions.weights".format(name)
-            if weights_key in state_dict:
-                print("deleting {0}".format(weights_key))
-                del state_dict[weights_key]
-            state_dict[
-                "{}.embed_positions._float_tensor".format(name)
-            ] = torch.FloatTensor(1)
-        for i in range(self.num_layers):
-            # update layer norms
-            self.layers[i].upgrade_state_dict_named(
-                state_dict, "{}.layers.{}".format(name, i)
-            )
-
-        version_key = "{}.version".format(name)
-        if utils.item(state_dict.get(version_key, torch.Tensor([1]))[0]) < 2:
-            # earlier checkpoints did not normalize after the stack of layers
-            self.layer_norm = None
-            self.normalize = False
-            state_dict[version_key] = torch.Tensor([1])
-        return state_dict
 
 
 class TransformerDecoderMultiLayerBlockModule(nn.Module):
@@ -361,17 +260,13 @@ class TransformerDecoder(IncrementalDecoder):
             self.dropout_module = None
 
         self.share_input_output_embed = args.share_decoder_input_output_embed
-
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = args.decoder_embed_dim
         self.embed_dim = embed_dim
         self.output_embed_dim = args.decoder_output_dim
-
         self.padding_idx = embed_tokens.padding_idx
         self.max_target_positions = args.max_target_positions
-
         self.embed_tokens = embed_tokens
-
         self.embed_scale = 1.0 if args.no_scale_embedding else math.sqrt(embed_dim)
 
         self.project_in_dim = (
@@ -380,6 +275,9 @@ class TransformerDecoder(IncrementalDecoder):
             else None
         )
         self.use_alibi: bool = getattr(args, "alibi", False)
+        self.self_attn_doc_sep: int = getattr(
+            args, "self_attn_doc_sep", UNSPECIFIED_DOC_SEP
+        )
         initialize_params_on_gpu = getattr(
             args, "tensor_parallel_init_model_on_gpu", False
         )
@@ -397,6 +295,7 @@ class TransformerDecoder(IncrementalDecoder):
             if args.decoder_learned_pos and not self.use_alibi
             else None
         )
+
         if initialize_params_on_gpu and self.embed_positions is not None:
             self.embed_positions = utils.floating_point_precision_convertor(
                 self.embed_positions.cuda(),
@@ -408,7 +307,6 @@ class TransformerDecoder(IncrementalDecoder):
         self.cross_self_attention = getattr(args, "cross_self_attention", False)
 
         self.layers = nn.ModuleList([])
-
         layers = []
         for i in range(args.decoder_layers):
             layers.append(
@@ -448,7 +346,7 @@ class TransformerDecoder(IncrementalDecoder):
                 layer_block = fsdp_wrap(
                     layer_block,
                     min_num_params=min_params_to_wrap,
-                    process_group=dist_utils.get_data_parallel_group(),
+                    process_group=distributed_utils.get_data_parallel_group(),
                 )
                 self.layers.append(layer_block)
         else:
@@ -562,7 +460,7 @@ class TransformerDecoder(IncrementalDecoder):
         layer = fsdp_wrap(
             layer,
             min_num_params=min_params_to_wrap,
-            process_group=dist_utils.get_data_parallel_group(),
+            process_group=distributed_utils.get_data_parallel_group(),
         )
         return layer
 
@@ -575,10 +473,55 @@ class TransformerDecoder(IncrementalDecoder):
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
     ):
         # embed tokens and positions
-        positions = None
+        if self.self_attn_doc_sep != UNSPECIFIED_DOC_SEP:
+            # create own positions when self_attn_doc_sep is set
+            # We are essentially resetting positions based on document separator tokens.
+            # For instance, if the doc separator is 2, and the tokens are
+            # 143 345 2 5435 2
+            # The default positions would be
+            # 2 3 4 5 6
+            # But with document level attention, we would like to reset positions
+            # as well on sentence boundaries. So, the positions become
+            # 2 3 4 2 3
+
+            mask = tokens.ne(self.padding_idx).int()
+            mask_with_reset = tokens.ne(self.padding_idx).int()
+            mask_with_reset[:, :] = 1
+            doc_id_indices = (tokens == self.self_attn_doc_sep).nonzero().tolist()
+
+            # Based on the location of document seperator token (batch_doc_indices), we would reset
+            # positional embeddings. The document seperator token marks the end of the preceding
+            # document.
+            for batch_idx in range(tokens.size(0)):
+                # The self_attn_doc_sep token marks the end of the previous document. Therefore,
+                # we need to add 1 to the indices to mark the start of documents.
+                batch_doc_indices = [
+                    index[1] + 1
+                    for index in doc_id_indices
+                    # index[1] + 1 < tokens.size(1) to prevent overflow
+                    if index[0] == batch_idx and index[1] + 1 < tokens.size(1)
+                ]
+                batch_doc_indices.sort()
+                for k, doc_sep_idx in enumerate(batch_doc_indices):
+                    if k == 0:
+                        mask_with_reset[batch_idx, doc_sep_idx] = -doc_sep_idx + 1
+                    else:
+                        mask_with_reset[batch_idx, doc_sep_idx] = (
+                            batch_doc_indices[k - 1] - doc_sep_idx + 1
+                        )
+            positions = (
+                torch.cumsum(mask_with_reset, dim=1).type_as(mask) * mask
+            ).long() + self.padding_idx
+
+            # If the positions are pre-computed, padding_idx should not be set.
+            # Ref metaseq/metaseq/modules/learned_positional_embedding.py
+            if self.embed_positions is not None:
+                self.embed_positions.padding_idx = None
+        else:
+            positions = None
         if self.embed_positions is not None:
             positions = self.embed_positions(
-                tokens, incremental_state=incremental_state
+                tokens, incremental_state=incremental_state, positions=positions
             )
 
         # see IncrementalDecoder for important information about
@@ -613,17 +556,14 @@ class TransformerDecoder(IncrementalDecoder):
 
         return x, embed, positions
 
+    # forward for TransformerDecoder
     def forward(
         self,
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         features_only: bool = False,
-        full_context_alignment: bool = False,
-        alignment_layer: Optional[int] = None,
-        alignment_heads: Optional[int] = None,
         src_lengths: Optional[Any] = None,
-        return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
@@ -642,12 +582,6 @@ class TransformerDecoder(IncrementalDecoder):
                 :ref:`Incremental decoding`
             features_only (bool, optional): only return features without
                 applying output layer (default: False).
-            full_context_alignment (bool, optional): don't apply
-                auto-regressive mask to self-attention (default: False).
-            alignment_layer (int, optional): return mean alignment over
-                heads at this layer (default: last layer).
-            alignment_heads (int, optional): only average alignment over
-                this many heads (default: all heads).
             token_embeddings (torch.Tensor, optional): precomputed embeddings
                 default `None` will recompute embeddings
             self_attn_padding_mask (torch.Tensor, optional): precomputed padding
@@ -664,9 +598,6 @@ class TransformerDecoder(IncrementalDecoder):
             prev_output_tokens,
             encoder_out=encoder_out,
             incremental_state=incremental_state,
-            full_context_alignment=full_context_alignment,
-            alignment_layer=alignment_layer,
-            alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
             token_probs=token_probs,
@@ -681,9 +612,6 @@ class TransformerDecoder(IncrementalDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]],
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
-        full_context_alignment: bool = False,
-        alignment_layer: Optional[int] = None,
-        alignment_heads: Optional[int] = None,
         token_embeddings: Optional[torch.Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
@@ -693,9 +621,6 @@ class TransformerDecoder(IncrementalDecoder):
             prev_output_tokens,
             encoder_out=encoder_out,
             incremental_state=incremental_state,
-            full_context_alignment=full_context_alignment,
-            alignment_layer=alignment_layer,
-            alignment_heads=alignment_heads,
             token_embeddings=token_embeddings,
             self_attn_padding_mask=self_attn_padding_mask,
             token_probs=token_probs,
@@ -707,9 +632,6 @@ class TransformerDecoder(IncrementalDecoder):
         prev_output_tokens,
         encoder_out: Optional[Dict[str, List[Tensor]]],
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
-        full_context_alignment: bool = False,
-        alignment_layer: Optional[int] = None,
-        alignment_heads: Optional[int] = None,
         token_embeddings: Optional[Tensor] = None,
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
@@ -720,8 +642,7 @@ class TransformerDecoder(IncrementalDecoder):
         super().extract_features, but super() is not supported in torchscript. A copy
         of this function is made to be used in the subclass instead.
         """
-        if alignment_layer is None:
-            alignment_layer = self.num_layers - 1
+        last_layer_idx = self.num_layers - 1
 
         # compute self-attention padding mask (involves device-to-host transfer,
         # so put it at the top of the forward)
@@ -736,8 +657,8 @@ class TransformerDecoder(IncrementalDecoder):
 
         # see IncrementalDecoder for important information about
         # incremental state. Note that it may be an empty dictionary.
-        if not incremental_state and not full_context_alignment:
-            self_attn_mask = self.buffered_future_mask(x)
+        if not incremental_state:
+            self_attn_mask = self.buffered_future_mask(x, prev_output_tokens)
         else:
             self_attn_mask = None
 
@@ -770,18 +691,15 @@ class TransformerDecoder(IncrementalDecoder):
                 incremental_state=incremental_state,
                 self_attn_mask=self_attn_mask,
                 self_attn_padding_mask=self_attn_padding_mask,
-                need_attn=bool((idx == alignment_layer)),
-                need_head_weights=bool((idx == alignment_layer)),
+                need_attn=bool((idx == last_layer_idx)),
+                need_head_weights=bool((idx == last_layer_idx)),
             )
             l_aux.append(l_aux_i)
-            if layer_attn is not None and idx == alignment_layer:
+            if layer_attn is not None and idx == last_layer_idx:
                 attn = layer_attn.float().to(x)
 
         inner_states.append(x)
         if attn is not None:
-            if alignment_heads is not None:
-                attn = attn[:alignment_heads]
-
             # average probabilities over heads
             attn = attn.mean(dim=0)
 
@@ -806,7 +724,7 @@ class TransformerDecoder(IncrementalDecoder):
             return self.max_target_positions
         return min(self.max_target_positions, self.embed_positions.max_positions)
 
-    def buffered_future_mask(self, tensor):
+    def buffered_future_mask(self, tensor, input_tokens=None):
         batch_size, cur_seq_len = tensor.size(0), tensor.size(1)
         max_seq_len = self.max_positions()
         need_to_make_new_mask = (
@@ -818,6 +736,7 @@ class TransformerDecoder(IncrementalDecoder):
                 and self._future_mask.size(0)
                 != (batch_size * self.args.decoder_attention_heads)
             )
+            or (self.self_attn_doc_sep != UNSPECIFIED_DOC_SEP)
         )
 
         # self._future_mask.device != tensor.device is not working in TorchScript. This is a workaround.
@@ -825,9 +744,25 @@ class TransformerDecoder(IncrementalDecoder):
             self._future_mask = torch.triu(
                 utils.fill_with_neg_inf(torch.zeros([max_seq_len, max_seq_len])), 1
             )
+            if self.self_attn_doc_sep != UNSPECIFIED_DOC_SEP:
+                # Code to accomodate dynamic attention when document seperator is used
+                assert input_tokens is not None
+                self._future_mask = self._future_mask[:cur_seq_len, :cur_seq_len]
+                self._future_mask = self._future_mask.unsqueeze(0).repeat(
+                    batch_size, 1, 1
+                )
+                doc_id_indices = (
+                    (input_tokens == self.self_attn_doc_sep).nonzero().tolist()
+                )
+                for indices in doc_id_indices:
+                    self._future_mask[
+                        indices[0], indices[1] + 1 :, : indices[1] + 1
+                    ] = float("-inf")
+
             if self.use_alibi:
                 alibi = self.alibi.repeat(batch_size, 1, 1)  # batch_size, 1, 1
                 self._future_mask = self._future_mask.unsqueeze(0) + alibi
+
         self._future_mask = self._future_mask.to(tensor)
         if self.use_alibi:
             return self._future_mask[
@@ -835,55 +770,10 @@ class TransformerDecoder(IncrementalDecoder):
                 :cur_seq_len,
                 :cur_seq_len,
             ]
+        elif self.self_attn_doc_sep != UNSPECIFIED_DOC_SEP:
+            return self._future_mask
         else:
             return self._future_mask[:cur_seq_len, :cur_seq_len]
-
-    def upgrade_state_dict_named(self, state_dict, name):
-        """Upgrade a (possibly old) state dict for new versions of metaseq."""
-        if isinstance(self.embed_positions, SinusoidalPositionalEmbedding):
-            weights_key = "{}.embed_positions.weights".format(name)
-            if weights_key in state_dict:
-                del state_dict[weights_key]
-            state_dict[
-                "{}.embed_positions._float_tensor".format(name)
-            ] = torch.FloatTensor(1)
-
-        if f"{name}.output_projection.weight" not in state_dict:
-            if self.share_input_output_embed:
-                embed_out_key = f"{name}.embed_tokens.weight"
-            else:
-                embed_out_key = f"{name}.embed_out"
-            if embed_out_key in state_dict:
-                state_dict[f"{name}.output_projection.weight"] = state_dict[
-                    embed_out_key
-                ]
-                if not self.share_input_output_embed:
-                    del state_dict[embed_out_key]
-
-        for i in range(self.num_layers):
-            # update layer norms
-            layer_norm_map = {
-                "0": "self_attn_layer_norm",
-                "1": "encoder_attn_layer_norm",
-                "2": "final_layer_norm",
-            }
-            for old, new in layer_norm_map.items():
-                for m in ("weight", "bias"):
-                    k = "{}.layers.{}.layer_norms.{}.{}".format(name, i, old, m)
-                    if k in state_dict:
-                        state_dict[
-                            "{}.layers.{}.{}.{}".format(name, i, new, m)
-                        ] = state_dict[k]
-                        del state_dict[k]
-
-        version_key = "{}.version".format(name)
-        if utils.item(state_dict.get(version_key, torch.Tensor([1]))[0]) <= 2:
-            # earlier checkpoints did not normalize after the stack of layers
-            self.layer_norm = None
-            self.normalize = False
-            state_dict[version_key] = torch.Tensor([1])
-
-        return state_dict
 
 
 def Embedding(
