@@ -203,9 +203,16 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
         total_loss = 0
         for T in range(self.task.args.max_T):
             if self.task.args.step_positioning_policy == "token":
-                positional_tokens = torch.tensor([self.task.step_tokens[T] for _ in range(
-                    prev_input['src_tokens'].shape[0])], device=prev_input["src_tokens"].device).unsqueeze(1)
-                prev_input["src_tokens"] = torch.cat((positional_tokens, prev_input["src_tokens"][:, :-1]), dim=1)
+                positional_tokens = torch.tensor(
+                    [
+                        self.task.step_tokens[T]
+                        for _ in range(prev_input["src_tokens"].shape[0])
+                    ],
+                    device=prev_input["src_tokens"].device,
+                ).unsqueeze(1)
+                prev_input["src_tokens"] = torch.cat(
+                    (positional_tokens, prev_input["src_tokens"][:, :-1]), dim=1
+                )
             elif self.task.args.step_positioning_policy == "embedding":
                 prev_input["diff_embed_positions"] = self.task.step_embeddings[T]
             net_output = model(**prev_input)
@@ -215,11 +222,26 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
             total_loss = total_loss + loss
             logging_output[f"diff_loss_{T}"] = loss.data
             logging_output[f"diff_loss_{T}_size"] = unreduced_loss.numel()
-            if self.task.args.use_probabilistic_embedding_proj_rank == -1:
-                self.task.args.use_probabilistic_embedding_proj_rank = probs.shape[-1]
+            current_rank = None
+            if self.task.args.use_probabilistic_embedding_proj_rank_min == -1:
+                current_rank = probs.shape[-1]
+            else:
+                current_rank = int(
+                    self.task.args.use_probabilistic_embedding_proj_rank_max
+                    - T
+                    * (
+                        (
+                            self.task.args.use_probabilistic_embedding_proj_rank_max
+                            - self.task.args.use_probabilistic_embedding_proj_rank_min
+                        )
+                        / self.task.args.max_T
+                    )
+                )
+                assert current_rank > 0
+
             flattened_prob, flattened_ind = torch.topk(
                 probs.detach(),
-                self.task.args.use_probabilistic_embedding_proj_rank,
+                current_rank,
                 dim=-1,
             )
             prev_input = {

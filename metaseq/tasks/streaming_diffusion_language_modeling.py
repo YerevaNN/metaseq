@@ -74,20 +74,26 @@ class StreamingDiffusionLanguageModelingConfig(StreamingLanguageModelingConfig):
         default=200,
         metadata={"help": "maximum number of samples in the buffer"},
     )
-    use_probabilistic_embedding_proj_rank: Optional[int] = field(
+    use_probabilistic_embedding_proj_rank_min: Optional[int] = field(
         default=-1, metadata={"help": "Top probabilities to take before projecting"}
     )
+    use_probabilistic_embedding_proj_rank_max: Optional[int] = field(
+        default=-1, metadata={"help": "Top probabilities to take before projecting"}
+    )
+
     full_context_alignment: Optional[bool] = field(
         default=False, metadata={"help": "Use full context aligment or not"}
     )
     step_positioning_policy: Optional[str] = field(
-        default="", metadata={"help": "Diffusion step positioning policy: token, embedding, none"}
+        default="",
+        metadata={"help": "Diffusion step positioning policy: token, embedding, none"},
     )
     step_positioning_embedding_learned: Optional[bool] = field(
         default=False, metadata={"help": "Diffusion step PositionalEmbedding learned"}
     )
     step_positioning_embedding_learned_sinusoidal: Optional[bool] = field(
-        default=False, metadata={"help": "Diffusion step PositionalEmbedding learned_sinusoidal"}
+        default=False,
+        metadata={"help": "Diffusion step PositionalEmbedding learned_sinusoidal"},
     )
 
 
@@ -121,6 +127,7 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
 
         final_vocab_size = args.final_vocab_size
         # final_vocab_size = 51200 for roberta dictionary
+        # TODO: Hov
         if final_vocab_size is not None:
             if final_vocab_size < tok_vocab_size:
                 raise ValueError(
@@ -133,12 +140,13 @@ class StreamingDiffusionLanguageModelingTask(StreamingLanguageModelingTask):
     def _initialize_step_embeddings(self, args):
         self.step_embeddings = []
         for t in range(args.max_T):
-            positional_embedding = PositionalEmbedding(len(self.dictionary),
-                                                       self.cfg_model.decoder_input_dim,
-                                                       self.dictionary.pad(),
-                                                       learned=args.step_positioning_embedding_learned,
-                                                       learned_sinusoidal=args.step_positioning_embedding_learned_sinusoidal
-                                                       )
+            positional_embedding = PositionalEmbedding(
+                len(self.dictionary),
+                self.cfg_model.decoder_input_dim,
+                self.dictionary.pad(),
+                learned=args.step_positioning_embedding_learned,
+                learned_sinusoidal=args.step_positioning_embedding_learned_sinusoidal,
+            )
 
             initialize_params_on_gpu = getattr(
                 self.cfg_model, "tensor_parallel_init_model_on_gpu", False
