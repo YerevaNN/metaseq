@@ -200,15 +200,8 @@ def distributed_main(i, main, cfg: MetaseqConfig, kwargs):
     after_distributed_init_fn = kwargs.pop("after_distributed_init_fn", None)
     if after_distributed_init_fn:
         cfg = after_distributed_init_fn(cfg)
-    retval = main(cfg, **kwargs)
-    global_barrier()
-    return retval
+    main(cfg, **kwargs)
 
-
-def global_barrier():
-    """
-    A global barrier that all workers in all process groups must wait for.
-    """
     if torch.distributed.is_initialized():
         torch.distributed.barrier(get_global_group())
 

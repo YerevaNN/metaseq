@@ -70,7 +70,13 @@ class Trainer(object):
                     "Please update to fairscale 0.4.0 or newer when combining "
                     "--update-freq with FullyShardedDataParallel"
                 )
+            if self.cfg.optimizer == "adam8bit":
+                assert (
+                    self.use_sharded_state
+                ), "adam8bit + FSDP requires --use-sharded-state"
             if self.use_sharded_state:
+                import fairscale
+
                 assert (
                     fairscale.__version__ >= "0.3.9"
                 ), "--use-sharded-state requires newer fairscale. pip install -U fairscale"
@@ -465,7 +471,9 @@ class Trainer(object):
 
             # load model parameters
             try:
-                self.model.load_state_dict(state["model"], strict=True)
+                self.model.load_state_dict(
+                    state["model"], strict=True, model_cfg=self.cfg.model
+                )
                 # save memory for later steps
                 del state["model"]
                 if utils.has_parameters(self.get_criterion()):

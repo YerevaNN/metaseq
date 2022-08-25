@@ -38,14 +38,18 @@ def get_progress_bar(
     else:
         raise ValueError("Unknown log format: {}".format(log_format))
 
-    if wandb_project:
-        bar = WandBProgressBarWrapper(bar, wandb_project, run_name=wandb_run_name)
-    elif tensorboard_logdir:
+    if tensorboard_logdir:
         bar = TensorboardProgressBarWrapper(bar, tensorboard_logdir)
 
     if aim_repo:
         bar = AimProgressBarWrapper(
-            bar, aim_repo, aim_run_hash, aim_param_checkpoint_dir
+            bar,
+            aim_repo=aim_repo,
+            aim_run_hash=aim_run_hash,
+            aim_param_checkpoint_dir=aim_param_checkpoint_dir,
         )
+
+    if wandb_project:
+        bar = WandBProgressBarWrapper(bar, wandb_project, run_name=wandb_run_name)
 
     return bar

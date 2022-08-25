@@ -5,7 +5,6 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from argparse import Namespace  # noqa: F401
 import json
 import logging
 import os
@@ -216,6 +215,11 @@ def torch_load_cpu(path):
         return state
     if "cfg" in state:
         state["cfg"] = recursively_cast_dictconfigs(state["cfg"])
+        if (
+            state["cfg"]["common"]["fp16"]
+            or state["cfg"]["common"]["memory_efficient_fp16"]
+        ):
+            state["model"] = {k: v.half() for k, v in state["model"].items()}
 
     return state
 
