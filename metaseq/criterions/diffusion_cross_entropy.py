@@ -226,7 +226,7 @@ class DiffusionCrossEntropyBalancedCriterion(BaseCriterion):
             if self.task.args.use_probabilistic_embedding_proj_rank_min == -1:
                 current_rank = probs.shape[-1]
             else:
-                current_rank = (
+                current_rank = int(
                     self.task.args.use_probabilistic_embedding_proj_rank_max
                     - T
                     * (

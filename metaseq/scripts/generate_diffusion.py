@@ -6,7 +6,9 @@ python -m metaseq.scripts.consolidate_fsdp_shards $model_dir/checkpoint_last --n
 
 
 import random
-import json, os, re
+import json
+import os
+import re
 from more_itertools import sample
 import numpy as np
 import torch
@@ -17,6 +19,7 @@ import torch
 from torch import nn
 from typing import Dict, Optional
 from tqdm import tqdm
+from tokenizers import ByteLevelBPETokenizer
 
 
 def set_seed(seed):
@@ -29,14 +32,17 @@ def set_seed(seed):
 # Load the model. (make sure use GPU machine)
 
 custom_lm = TransformerLanguageModel.from_pretrained(
-    "/path",
-    "checkpoint.pt",
+    "/home/tmyn/moe/hdd/checkpoints/runs11/transformer_pile-00_0_exp7",
+    "checkpoint_last.pt",
 )
 # custom_lm = custom_lm.cuda().eval().float()
 
+tokenizer = ByteLevelBPETokenizer.from_file("data-bin/pile-00/bpe-vocab.json", "data-bin/pile-00/bpe-merges.txt")
+
 
 def binarize(sentence: str) -> torch.LongTensor:
-    return torch.LongTensor(tokenizer.encode(sentence).ids)  # ADD ENCODE FUNC
+    return torch.LongTensor(tokenizer.encode(sentence).ids).half()
+    # return torch.LongTensor(tokenizer.encode(sentence).ids)  # ADD ENCODE FUNC
 
 
 custom_lm.binarize = binarize
@@ -67,11 +73,11 @@ def unpack_decoder_out(model, decoder_out, temperature: float):
         if attn is not None:
             attn = attn[:, -1, :]
 
-    decoder_out_tuple = (
+    decoder_out, extras = (
         decoder_out[0][:, -1:, :].div_(temperature),
         None if decoder_len <= 1 else decoder_out[1],
     )
-    probs = model.get_normalized_probs(decoder_out_tuple, log_probs=True, sample=None)
+    probs = model.get_normalized_probs(decoder_out, log_probs=True)
     probs = probs[:, -1, :]
     return probs, attn
 
@@ -241,6 +247,8 @@ class DiffusionSampling(nn.Module):
         projection_rank: int,
         max_T: int = 5,
     ):
+        super().__init__()
+
         assert projection_rank > 0
 
         self.projection_rank = projection_rank
@@ -278,8 +286,9 @@ class GreedyDiffusionSampling(DiffusionSampling):
 
 T0_sampler = TopPSampling(custom_lm, 256, 1024 + 256, 0.25, 1, True)
 TN_sampler = GreedyDiffusionSampling(custom_lm, 15)
-T0_sampler.cuda()
-TN_sampler.cuda()
+T0_sampler.cuda().half()
+TN_sampler.cuda().half()
 
 prompt = binarize("whatever")
 output = TN_sampler.diffuse(T0_sampler.decode(prompt)[1])
+print(output)
