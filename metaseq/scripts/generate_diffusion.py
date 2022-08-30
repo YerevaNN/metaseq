@@ -4,20 +4,22 @@ model_dir=<checkpoint_parent_directory>
 python -m metaseq.scripts.consolidate_fsdp_shards $model_dir/checkpoint_last --new_arch_name transformer_lm
 """
 
-
+import argparse
 import random
-import json
-import os
-import re
-from more_itertools import sample
 import numpy as np
 import torch
 from tqdm import tqdm
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Dict, Optional, Callable
+from metaseq import (
+    options,
+    utils,
+)
 from metaseq.models.transformer_lm import TransformerLanguageModel
+from metaseq.dataclass.utils import convert_namespace_to_omegaconf
 import torch
 from torch import nn
 from typing import Dict, Optional
+from omegaconf import DictConfig
 from tqdm import tqdm
 from tokenizers import ByteLevelBPETokenizer
 
@@ -29,23 +31,33 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
 
 
-# Load the model. (make sure use GPU machine)
+def main(cfg: DictConfig) -> None:
+    utils.import_user_module(cfg.common)
 
-custom_lm = TransformerLanguageModel.from_pretrained(
-    "/home/tmyn/moe/hdd/checkpoints/runs11/transformer_pile-00_0_exp7",
-    "checkpoint_last.pt",
-)
-# custom_lm = custom_lm.cuda().eval().float()
+    model = TransformerLanguageModel.from_pretrained(
+        cfg.checkpoint.save_dir,
+        cfg.checkpoint.restore_file,
+    )
 
-tokenizer = ByteLevelBPETokenizer.from_file("data-bin/pile-00/bpe-vocab.json", "data-bin/pile-00/bpe-merges.txt")
+    model.binarize = binarize
+    # model = model.cuda().eval().float()
+
+    tokenizer = ByteLevelBPETokenizer.from_file(cfg.criterion.vocab_filename, cfg.criterion.merges_filename)
+
+    T0_sampler = TopPSampling(model, 256, 1024 + 256, 0.25, 1, True)
+    TN_sampler = GreedyDiffusionSampling(model, 15)
+    T0_sampler.cuda().half()
+    TN_sampler.cuda().half()
+
+    prompt = binarize(tokenizer, "they")
+    decoded_tokens, log_probs = T0_sampler.decode(prompt)
+    output = TN_sampler.diffuse(model, log_probs, decoded_tokens)
+
+    print(decode_tokenizer(tokenizer, output[0]))
 
 
-def binarize(sentence: str) -> torch.LongTensor:
+def binarize(tokenizer, sentence: str) -> torch.LongTensor:
     return torch.LongTensor(tokenizer.encode(sentence).ids).half()
-    # return torch.LongTensor(tokenizer.encode(sentence).ids)  # ADD ENCODE FUNC
-
-
-custom_lm.binarize = binarize
 
 
 def forward_encoder(model, net_input):
@@ -54,8 +66,8 @@ def forward_encoder(model, net_input):
     return model.encoder.forward_torchscript(net_input)
 
 
-def decode_tokenizer(tokenized_sent: torch.LongTensor):
-    return "".join([tokenizer.id_to_token(t) for t in tokenized_sent]).replace("Ġ", " ")
+def decode_tokenizer(tokenizer, tokenized_sent: torch.LongTensor):
+    return " ".join([tokenizer.id_to_token(t) for t in tokenized_sent if tokenizer.id_to_token(t)]).replace("Ġ", " ")
 
 
 def unpack_decoder_out(model, decoder_out, temperature: float):
@@ -78,7 +90,7 @@ def unpack_decoder_out(model, decoder_out, temperature: float):
         None if decoder_len <= 1 else decoder_out[1],
     )
     probs = model.get_normalized_probs(decoder_out, log_probs=True)
-    probs = probs[:, -1, :]
+    # probs = probs[:, -1, :]
     return probs, attn
 
 
@@ -110,6 +122,7 @@ class DecodingBase(nn.Module):
                 prefix = torch.tensor([self.eos]).to(self.dummy_param.device)
             prefix = prefix.to(self.dummy_param.device)
             assert prefix.ndim == 1 and prefix.size(0) > 0
+
             if prefix[0] != self.eos:
                 prefix = torch.cat([torch.tensor([self.eos]).to(prefix), prefix])
             prefix_len: int = prefix.size(0)
@@ -140,24 +153,23 @@ class DecodingBase(nn.Module):
             )
             tokens[:, : len(prefix)] = prefix
             all_probs = []
-            for step in tqdm(range(1, self.max_len)):
+            for step in tqdm(range(1, self.max_len + 1)):
                 decoder_out = self.model.decoder.forward(
                     tokens[:, :step],
                     encoder_out=encoder_out,
                     incremental_state=incremental_states,
                 )
-                logprobs, _ = unpack_decoder_out(
-                    self.model, decoder_out, self.temperature
-                )
+                logprobs, _ = unpack_decoder_out(self.model, decoder_out, self.temperature)
                 all_probs.append(logprobs)
-                if step < len(prefix):
-                    tokens[:, step] = prefix[step]
-                else:
-                    tokens[:, step] = self.choice(logprobs.squeeze(), step)
+                if step + 1 < self.max_len:
+                    if step < len(prefix):
+                        tokens[:, step] = prefix[step]
+                    else:
+                        tokens[:, step] = self.choice(logprobs.squeeze(), step)
 
             if self.return_probs:
-                return tokens.squeeze(0), torch.stack(all_probs)
-            return tokens.squeeze(0)
+                return tokens, torch.stack(all_probs, dim=1)
+            return tokens, None
 
     def choice(self, logprob: torch.Tensor, step: int) -> int:
         raise NotImplementedError
@@ -261,7 +273,7 @@ class DiffusionSampling(nn.Module):
         self.max_T = max_T
         self.dummy_param = nn.Parameter(torch.empty(0))
 
-    def diffuse(self, prev_log_prob: torch.Tensor):
+    def diffuse(self, model, prev_log_prob: torch.Tensor, prev_tokens: torch.Tensor):
         with torch.inference_mode():
             for _ in range(self.max_T):
                 flattened_prob, flattened_ind = torch.topk(
@@ -269,10 +281,14 @@ class DiffusionSampling(nn.Module):
                     self.projection_rank,
                     dim=-1,
                 )
-                prev_log_prob = self.model.decoder.forward(
-                    token_probs=(flattened_prob, flattened_ind),
-                    full_context_alignment=True,
-                )
+                self_attn_padding_mask = torch.eq(prev_tokens, torch.zeros_like(
+                    prev_tokens).fill_(model.task.dictionary.pad()))
+
+                prev_log_prob, prev_extras = self.model.decoder.forward(prev_log_prob,
+                                                                        token_probs=(flattened_prob, flattened_ind),
+                                                                        full_context_alignment=True,
+                                                                        self_attn_padding_mask=self_attn_padding_mask
+                                                                        )
         return self.choice(prev_log_prob).cpu().numpy().tolist()
 
     def choice(self, logprob: torch.Tensor, step: int) -> int:
@@ -284,11 +300,16 @@ class GreedyDiffusionSampling(DiffusionSampling):
         return torch.argmax(logprob, dim=-1)
 
 
-T0_sampler = TopPSampling(custom_lm, 256, 1024 + 256, 0.25, 1, True)
-TN_sampler = GreedyDiffusionSampling(custom_lm, 15)
-T0_sampler.cuda().half()
-TN_sampler.cuda().half()
+def cli_main(
+    modify_parser: Optional[Callable[[argparse.ArgumentParser], None]] = None
+) -> None:
+    parser = options.get_training_parser()
+    args = options.parse_args_and_arch(parser, modify_parser=modify_parser)
 
-prompt = binarize("whatever")
-output = TN_sampler.diffuse(T0_sampler.decode(prompt)[1])
-print(output)
+    cfg = convert_namespace_to_omegaconf(args)
+
+    main(cfg)
+
+
+if __name__ == "__main__":
+    cli_main()
