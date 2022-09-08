@@ -425,7 +425,7 @@ class TransformerDecoder(IncrementalDecoder):
                 0, len(layers), self.args.fsdp_checkpoint_wrap_layer_frequency
             ):
                 layer_block = TransformerDecoderMultiLayerBlockModule(
-                    layers[i : i + self.args.fsdp_checkpoint_wrap_layer_frequency]
+                    layers[i: i + self.args.fsdp_checkpoint_wrap_layer_frequency]
                 )
                 checkpoint = getattr(args, "checkpoint_activations", False)
                 if checkpoint:
@@ -572,6 +572,7 @@ class TransformerDecoder(IncrementalDecoder):
         token_embedding: Optional[torch.Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
         diff_embed_positions: Optional[torch.Tensor] = None,
+        diff_initial_state: Optional[torch.Tensor] = None,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
     ):
         # embed tokens and positions
@@ -593,6 +594,10 @@ class TransformerDecoder(IncrementalDecoder):
                 token_embedding = self.embed_tokens(tokens)
             else:
                 token_embedding = self.embed_tokens(token_probs)
+
+            if diff_initial_state is not None:
+                diff_initial_state = diff_initial_state.to(token_embedding)
+                token_embedding.data = diff_initial_state.data
 
         x = embed = self.embed_scale * token_embedding
 
@@ -628,6 +633,7 @@ class TransformerDecoder(IncrementalDecoder):
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
         diff_embed_positions: Optional[torch.Tensor] = None,
+        diff_initial_state: Optional[torch.Tensor] = None,
     ):
         """
         Includes several features from "Jointly Learning to Align and
@@ -671,6 +677,7 @@ class TransformerDecoder(IncrementalDecoder):
             self_attn_padding_mask=self_attn_padding_mask,
             token_probs=token_probs,
             diff_embed_positions=diff_embed_positions,
+            diff_initial_state=diff_initial_state,
         )
         if not features_only:
             x = self.output_layer(x)
@@ -688,6 +695,7 @@ class TransformerDecoder(IncrementalDecoder):
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
         diff_embed_positions: Optional[torch.Tensor] = None,
+        diff_initial_state: Optional[torch.Tensor] = None,
     ):
         return self.extract_features_scriptable(
             prev_output_tokens,
@@ -700,6 +708,7 @@ class TransformerDecoder(IncrementalDecoder):
             self_attn_padding_mask=self_attn_padding_mask,
             token_probs=token_probs,
             diff_embed_positions=diff_embed_positions,
+            diff_initial_state=diff_initial_state,
         )
 
     def extract_features_scriptable(
@@ -714,6 +723,7 @@ class TransformerDecoder(IncrementalDecoder):
         self_attn_padding_mask: Optional[Tensor] = None,
         token_probs: Optional[torch.Tensor] = None,
         diff_embed_positions: Optional[torch.Tensor] = None,
+        diff_initial_state: Optional[torch.Tensor] = None,
     ):
         """
         A scriptable subclass of this class has an extract_features method and calls
@@ -735,6 +745,7 @@ class TransformerDecoder(IncrementalDecoder):
             token_embeddings,
             token_probs,
             diff_embed_positions,
+            diff_initial_state,
             incremental_state,
         )
 
