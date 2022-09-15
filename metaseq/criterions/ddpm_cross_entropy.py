@@ -45,7 +45,6 @@ class DDPMCrossEntropyCriterion(BaseCriterion):
     def __init__(self, task):
         super().__init__(task)
 
-    
     def p_losses(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -97,8 +96,7 @@ class DDPMCrossEntropyCriterion(BaseCriterion):
         logging_output.update(diffused_losses)
 
         prev_input = sample["net_input"]
-        src_tokens_shape = [*list(prev_input["src_tokens"].shape), model.decoder.embed_dim]
-        prev_input["diff_initial_state"] = torch.randn(src_tokens_shape, device=prev_input["src_tokens"].device)
+        prev_input["is_ddpm"] = True
         total_loss = 0
         for T in range(self.task.args.max_T):
             if self.task.args.step_positioning_policy == "token":
@@ -147,6 +145,7 @@ class DDPMCrossEntropyCriterion(BaseCriterion):
                 "src_tokens": prev_input["src_tokens"],
                 "token_probs": (flattened_prob, flattened_ind),
                 "full_context_alignment": self.task.args.full_context_alignment,
+                "is_ddpm": True
             }
         loss = total_loss / self.task.args.max_T
         logging_output["loss"] = loss.data
