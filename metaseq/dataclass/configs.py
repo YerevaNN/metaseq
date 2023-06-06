@@ -643,6 +643,26 @@ class GenerationConfig(MetaseqDataclass):
         default="-",
         metadata={"help": "file to read from; use - for stdin"},
     )
+    logprobs: int = field(
+        default=0,
+        metadata={"help": "sorting by probability and taking top-k probabilities"},
+    )
+    description: str = field(
+        default="",
+        metadata={"help": "description of a decoding method"},
+    )
+    generation_len: int = field(
+        default=1,
+        metadata={"help": "number of generated tokens"},
+    )
+    mol_repr: str = field(
+        default="smiles",
+        metadata={"help": "could be smiles/selfies"},
+    )
+    output_file_path: str = field(
+        default="./output.csv",
+        metadata={"help": "path to save results"},
+    )
 
 
 @dataclass

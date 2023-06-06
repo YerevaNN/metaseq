@@ -35,7 +35,12 @@ from metaseq.data.cm3_dataset import CausalMaskedDocumentToSequenceDataset
 from metaseq.dataclass import ChoiceEnum
 
 try:
-    from tokenizers import ByteLevelBPETokenizer, Tokenizer
+    from tokenizers import (
+        ByteLevelBPETokenizer,
+        Tokenizer,
+        BertWordPieceTokenizer,
+        pre_tokenizers,
+    )
 
     has_hf_tokenizers = True
 except ImportError:
@@ -48,6 +53,8 @@ DEFAULT_MULTICORPUS_MAX = -1
 
 LANGUAGE_MODELING_MODE = ChoiceEnum(["standard", "cm3", "racm3"])
 CM3_MODE = ChoiceEnum(["poisson", "fixed", "fim"])
+SMI_REGEX_PATTERN = r"""(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\|\/|:|~|@|\?|>>?|\*|\$|\%[0-9]{2}|[0-9])"""
+REGEX = None
 
 
 def map_old_image_token_to_new_image_token(text):
@@ -198,10 +205,23 @@ class StreamingLanguageModelingTask(LegacyTask):
 
         if args.hf_tokenizer:
             self.tokenizer = Tokenizer.from_file(args.hf_tokenizer)
-        else:
+        elif args.merges_filename:
             self.tokenizer = ByteLevelBPETokenizer.from_file(
                 args.vocab_filename, args.merges_filename
             )
+        else:
+            self.tokenizer = BertWordPieceTokenizer.from_file(
+                args.vocab_filename,
+                clean_text=False,
+                handle_chinese_chars=False,
+                strip_accents=None,
+                lowercase=False,
+            )
+            # required to prevent splitting "[nH]" into tokens ["[", "nH", "]"]
+            self.tokenizer.pre_tokenizer = pre_tokenizers.CharDelimiterSplit(
+                delimiter="&"
+            )
+            REGEX = re.compile(SMI_REGEX_PATTERN)
 
         if max(args.update_freq) > 1:
             raise NotImplementedError(
@@ -231,11 +251,11 @@ class StreamingLanguageModelingTask(LegacyTask):
         assert self.dictionary.bos_index == 0
         assert self.tokenizer.id_to_token(0) in {"<BOS>", "<s>"}
         assert self.dictionary.pad_index == 1
-        assert self.tokenizer.id_to_token(1) in {"<PAD>", "<pad>"}
+        assert self.tokenizer.id_to_token(1) in {"<PAD>", "<pad>", "[PAD]"}
         assert self.dictionary.eos_index == 2
         assert self.tokenizer.id_to_token(2) in {"<EOS>", "</s>"}
         assert self.dictionary.unk_index == 3
-        assert self.tokenizer.id_to_token(3) in {"<UNK>", "<unk>"}
+        assert self.tokenizer.id_to_token(3) in {"<UNK>", "<unk>", "[UNK]"}
 
         self.has_cm3 = args.language_modeling_type in ["cm3", "racm3"]
         self.has_retrieval = args.language_modeling_type == "racm3"
@@ -297,11 +317,22 @@ class StreamingLanguageModelingTask(LegacyTask):
 
     def _tokenize_one_json(self, json):
         text = json["text"]
-        return torch.LongTensor(
-            # append an end-of-document symbol after each document
-            self.tokenizer.encode(text.rstrip()).ids
-            + [self.eod]
-        )
+
+        if REGEX:
+            tokens = [token for token in REGEX.findall(text.rstrip())]
+            return torch.LongTensor(
+                # prepend and append an end-of-document symbol after each document
+                [self.eod]
+                + self.tokenizer.encode(tokens, is_pretokenized=True).ids
+                + [self.eod]
+            )
+        else:
+            return torch.LongTensor(
+                # prepend and append an end-of-document symbol after each document
+                [self.eod]
+                + self.tokenizer.encode(text, is_pretokenized=False).ids
+                + [self.eod]
+            )
 
     def tokenize_single_doc(self, doc, add_eod=False):
         doc = parse_doc(doc)
@@ -508,7 +539,7 @@ class StreamingLanguageModelingTask(LegacyTask):
                 drop_last=(split == "train"),
                 padding_idx=self.source_dictionary.pad(),
                 seed=self.args.seed,
-                percent_full_document_rotation=self.args.cm3_percent_full_document_rotation
+                percent_full_document_rotation=self.args.cm3_percent_full_document_rotation,
             )
         else:
             self.datasets[split] = DocumentToSequenceDataset(

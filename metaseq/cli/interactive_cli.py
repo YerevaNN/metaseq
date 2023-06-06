@@ -16,6 +16,14 @@ import ast
 import random
 import sys
 import logging
+import functools
+import re
+import math
+from tqdm import tqdm
+from rdkit import Chem
+import time
+import selfies as sf
+import parmap
 
 import torch
 
@@ -27,6 +35,11 @@ from metaseq.hub_utils import GeneratorInterface
 from metaseq.service.utils import build_logger
 
 import importlib
+
+import rdkit.RDLogger as rkl
+import rdkit.rdBase as rkrb
+
+rkrb.DisableLog("rdApp.error")
 
 if "METASEQ_SERVICE_CONSTANTS_MODULE" not in os.environ:
     constants_module = importlib.import_module("metaseq.service.constants")
@@ -65,6 +78,18 @@ def input_loop():
     return "\n".join(inp)
 
 
+def make_canonical_smiles(selfies):
+    canon_smiles = None
+    smiles = sf.decoder(selfies)
+
+    try:
+        canon_smiles = Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
+    except:
+        pass
+
+    return canon_smiles
+
+
 def worker_main(cfg: MetaseqConfig, namespace_args=None):
     global generator
     # make sure generations are stochastic since we have many workers
@@ -78,22 +103,65 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
     logging.getLogger("metaseq.hub_utils").setLevel(logging.WARNING)
 
     logger.info(f"loaded model {cfg.distributed_training.distributed_rank}")
-    request_object = distributed_utils.broadcast_object(
-        None, src_rank=0, group=distributed_utils.get_global_group()
-    )
-    if torch.distributed.get_rank() == 0:
-        while True:
-            prompt = input_loop()
-            tokens = generator.encode_fn(prompt)
+
+    if torch.distributed.is_initialized():
+        request_object = distributed_utils.broadcast_object(
+            None, src_rank=0, group=distributed_utils.get_global_group()
+        )
+
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        batch_size = cfg.dataset.batch_size
+        seed = cfg.common.seed
+        file_path = cfg.generation.output_file_path
+
+        if os.path.exists(file_path):
+            print(f"{file_path} already exists")
+            sys.exit(1)
+
+        csv_file = open(file_path, "wt+")
+        write_func = functools.partial(csv_file.write)
+
+        prompt = [[]] * batch_size
+
+        for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
             request_object = {
-                "inputs": [tokens],
-                "max_tokens": [128],
+                "inputs": prompt,
+                "max_tokens": None,
+                "min_tokens": [1] * batch_size,
+                "temperature": cfg.generation.temperature,
+                "top_p": cfg.generation.sampling_topp,
+                "logprobs": cfg.generation.logprobs,
+                "n": cfg.generation.beam,
+                "best_of": None,
+                "echo": False,
+                "stop": None,
+                "seed": None,
+                "use_cuda": True,
             }
-            distributed_utils.broadcast_object(
-                request_object, src_rank=0, group=distributed_utils.get_global_group()
-            )
+
+            if i == 0:
+                print(request_object)
+
             generations = generator.generate(**request_object)
-            print(generations[0][0]["text"])
+            smiles_batch = list(map(lambda x: x[0]["text"], generations))
+
+            if cfg.generation.mol_repr == "smiles":
+                # write in a file
+                write_func("\n".join(smiles_batch) + "\n")
+            else:
+                try:
+                    # if selfies
+                    canon_smiles_batch = parmap.map(
+                        make_canonical_smiles, smiles_batch, pm_processes=6
+                    )
+
+                    # write in a file
+                    write_func("\n".join(canon_smiles_batch) + "\n")
+                except:
+                    pass
+
+        print(f"Saved in {file_path}.")
+
     else:
         # useful in FSDP setting
         while True:

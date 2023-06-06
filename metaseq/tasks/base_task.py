@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List
 import torch
 from omegaconf import DictConfig
 
-from metaseq import metrics
+from metaseq.logging import metrics
 from metaseq.data import Dictionary, BaseDataset, data_utils, encoders, iterators
 from metaseq.dataclass import MetaseqDataclass
 from metaseq.dataclass.utils import gen_parser_from_dataclass

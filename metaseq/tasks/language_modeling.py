@@ -33,7 +33,12 @@ from metaseq.dataclass import ChoiceEnum, MetaseqDataclass
 from metaseq.tasks import LegacyTask, register_task
 
 try:
-    from tokenizers import ByteLevelBPETokenizer, Tokenizer
+    from tokenizers import (
+        ByteLevelBPETokenizer,
+        Tokenizer,
+        pre_tokenizers,
+        BertWordPieceTokenizer,
+    )
 
     has_hf_tokenizers = True
 except ImportError:
@@ -144,9 +149,21 @@ class LanguageModelingTask(LegacyTask):
 
         if args.hf_tokenizer:
             self.tokenizer = Tokenizer.from_file(args.hf_tokenizer)
-        else:
+        elif args.merges_filename:
             self.tokenizer = ByteLevelBPETokenizer.from_file(
                 args.vocab_filename, args.merges_filename
+            )
+        else:
+            self.tokenizer = BertWordPieceTokenizer.from_file(
+                args.vocab_filename,
+                clean_text=False,
+                handle_chinese_chars=False,
+                strip_accents=None,
+                lowercase=False,
+            )
+            # required to prevent splitting "[nH]" into tokens ["[", "nH", "]"]
+            self.tokenizer.pre_tokenizer = pre_tokenizers.CharDelimiterSplit(
+                delimiter="&"
             )
 
         self.eod = self.tokenizer.token_to_id(args.end_of_document_symbol)
@@ -182,11 +199,11 @@ class LanguageModelingTask(LegacyTask):
         assert self.dictionary.bos_index == 0
         assert self.tokenizer.id_to_token(0) in {"<BOS>", "<s>"}
         assert self.dictionary.pad_index == 1
-        assert self.tokenizer.id_to_token(1) in {"<PAD>", "<pad>"}
+        assert self.tokenizer.id_to_token(1) in {"<PAD>", "<pad>", "[PAD]"}
         assert self.dictionary.eos_index == 2
         assert self.tokenizer.id_to_token(2) in {"<EOS>", "</s>"}
         assert self.dictionary.unk_index == 3
-        assert self.tokenizer.id_to_token(3) in {"<UNK>", "<unk>"}
+        assert self.tokenizer.id_to_token(3) in {"<UNK>", "<unk>", "[UNK]"}
 
     @classmethod
     def setup_task(cls, args, **kwargs):

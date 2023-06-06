@@ -5,53 +5,51 @@
 
 import os
 
-MAX_SEQ_LEN = 2048
-BATCH_SIZE = 2048  # silly high bc we dynamically batch by MAX_BATCH_TOKENS
-MAX_BATCH_TOKENS = 3072
+MAX_SEQ_LEN = 64
+BATCH_SIZE = 3072  # silly high bc we dynamically batch by MAX_BATCH_TOKENS
+MAX_BATCH_TOKENS = 3072 * 64
 DEFAULT_PORT = 6010
-MODEL_PARALLEL = 8
-TOTAL_WORLD_SIZE = 8
-MAX_BEAM = 16
-
-try:
-    # internal logic denoting where checkpoints are in meta infrastructure
-    from metaseq_internal.constants import CHECKPOINT_FOLDER
-except ImportError:
-    # CHECKPOINT_FOLDER should point to a shared drive (e.g. NFS) where the
-    # checkpoints from S3 are stored. As an example:
-    # CHECKPOINT_FOLDER = "/example/175B/reshard_no_os"
-    # $ ls /example/175B/reshard_no_os
-    # reshard-model_part-0.pt
-    # reshard-model_part-1.pt
-    # reshard-model_part-2.pt
-    # reshard-model_part-3.pt
-    # reshard-model_part-4.pt
-    # reshard-model_part-5.pt
-    # reshard-model_part-6.pt
-    # reshard-model_part-7.pt
-    CHECKPOINT_FOLDER = "/example/175B/reshard_no_os"
+MODEL_PARALLEL = 1
+TOTAL_WORLD_SIZE = 1
+MAX_BEAM = 1
+SAMPLING_TOPP = 0.85
+TEMPERATURE = 1
+SEED = 3
+GEN_LEN = 40_000_000
+LOGPROBS = 0
+DESCRIPTION = f"top_{SAMPLING_TOPP}_seed_None"
+MOL_REPR = "smiles"  # selfies/smiles
+CHECKPOINT_ITER = 190000
+CHECKPOINT_FOLDER = "Generations_aspirin_0.4"  # Generations_aspirin_0.4 / Generations_sas_3_selfies / Generations_all
+TOKENIZER = (
+    "data-bin/tokenizers/tokenizer_smiles.json"
+    if MOL_REPR == "smiles"
+    else "data-bin/tokenizers/tokenizer_selfies/tokenizer.json"
+)
+# TOKENIZER = "data-bin/deepchem_dir/vocab.txt" if MOL_REPR=="smiles" else "data-bin/tokenizers/tokenizer_selfies/tokenizer.json"
 
 # tokenizer files
-BPE_MERGES = os.path.join(CHECKPOINT_FOLDER, "gpt2-merges.txt")
-BPE_VOCAB = os.path.join(CHECKPOINT_FOLDER, "gpt2-vocab.json")
-MODEL_FILE = os.path.join(CHECKPOINT_FOLDER, "reshard.pt")
+MODEL_FILE = os.path.join(CHECKPOINT_FOLDER, f"checkpoint_{CHECKPOINT_ITER}.pt")
+FILE_PATH = (
+    f"./{CHECKPOINT_FOLDER}/OPT_iter_{CHECKPOINT_ITER}_{DESCRIPTION}_seed_{SEED}.csv"
+)
 
 
 LAUNCH_ARGS = [
-    f"--model-parallel-size {MODEL_PARALLEL}",
-    f"--distributed-world-size {TOTAL_WORLD_SIZE}",
-    "--ddp-backend pytorch_ddp",
-    # If using FSDP shards, replace ddp-backend and add use-sharded-state
-    # "--ddp-backend fully_sharded",
-    # "--use-sharded-state",
     "--task language_modeling",
-    f"--bpe-merges {BPE_MERGES}",
-    f"--bpe-vocab {BPE_VOCAB}",
+    f"--hf-tokenizer {TOKENIZER}",
     "--bpe hf_byte_bpe",
-    f"--merges-filename {BPE_MERGES}",  # TODO(susanz): hack for getting interactive_hosted working on public repo
-    f"--vocab-filename {BPE_VOCAB}",  # TODO(susanz): hack for getting interactive_hosted working on public repo
     f"--path {MODEL_FILE}",
-    "--beam 1",
+    f"--beam {MAX_BEAM}",
+    f"--sampling-topp {SAMPLING_TOPP}",
+    f"--logprobs {LOGPROBS}",
+    f"--generation-len {GEN_LEN}",
+    f"--temperature {TEMPERATURE}",
+    f"--seed {SEED}",
+    f"--description {DESCRIPTION}",
+    f"--output-file-path {FILE_PATH}",
+    f"--mol-repr {MOL_REPR}",
+    "--sampling",
     "--distributed-port 13000",
     "--checkpoint-shard-count 1",
     f"--batch-size {BATCH_SIZE}",

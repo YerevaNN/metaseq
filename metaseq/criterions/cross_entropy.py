@@ -4,6 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import csv
+from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
@@ -95,6 +97,39 @@ class CrossEntropyCriterion(BaseCriterion):
             ignore_index=self.padding_idx,
             reduction="sum" if reduce else "none",
         )
+
+        ####################### calc PLL for each token #######################################
+        # special_token_inds = [
+        #     self.task.target_dictionary.eos_index,
+        #     self.task.target_dictionary.pad_index,
+        #     self.task.target_dictionary.bos_index,
+        #     self.task.target_dictionary.unk_index,
+        # ]
+        # seq_len = self.task.args["tokens_per_sample"]
+
+        # with open(f"./Perplexity_analysis/{self.task.args['data'][:-1]}.csv", 'a+', newline='') as file:
+        #     writer = csv.writer(file)
+
+        #     for i in tqdm(range(1, len(lprobs), seq_len)):
+
+        #         # Loss mean for one string through all its tokens
+        #         nll_loss_one_seq = F.nll_loss(
+        #             lprobs[i: i+seq_len],
+        #             target[i: i+seq_len],
+        #             ignore_index=self.padding_idx,
+        #             reduction="mean"
+        #         )
+
+        #         # Perplexity of a sequence
+        #         ppl_seq = utils.get_perplexity(nll_loss_one_seq)
+
+        #         # Decode
+        #         target_seq = "".join([self.task.tokenizer.decode([t]) for t in target[i: i+seq_len] if t not in special_token_inds])
+
+        #         # Write in a file
+        #         writer.writerow([str(ppl_seq), target_seq])
+        ########################################################################################
+
         return loss, loss
 
     @staticmethod
