@@ -24,6 +24,7 @@ from rdkit import Chem
 import time
 import selfies as sf
 import parmap
+import gradio as gr
 
 import torch
 
@@ -32,7 +33,9 @@ from metaseq.dataclass.configs import MetaseqConfig
 from metaseq.dataclass.utils import convert_namespace_to_omegaconf
 from metaseq.distributed import utils as distributed_utils
 from metaseq.hub_utils import GeneratorInterface
+from metaseq.sequence_generator_simple import ImageSequenceGenerator
 from metaseq.service.utils import build_logger
+
 
 import importlib
 
@@ -96,8 +99,9 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
     torch.manual_seed(random.randint(1, 20000))
     torch.cuda.manual_seed(random.randint(1, 20000))
 
-    generator = GeneratorInterface(cfg)
-    models = generator.load_model()  # noqa: F841
+    generator_old = GeneratorInterface(cfg)
+    models = generator_old.load_model()  # noqa: F841
+    tgt_dict = generator_old.tgt_dict
 
     # quiet some of the stuff for visual aspects
     logging.getLogger("metaseq.hub_utils").setLevel(logging.WARNING)
@@ -125,45 +129,46 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
         csv_file_sf = open(file_path_sf, "wt+")
         write_func_sf = functools.partial(csv_file_sf.write)
 
-        prompt = [[]] * batch_size
+        prompt = torch.LongTensor([2, 0]).repeat(batch_size, 1)
+
+        progress = gr.Progress()
+        generator = ImageSequenceGenerator(
+            models[0],
+            tgt_dict,
+            progress,
+            beam_size=cfg.generation.beam,
+            temperature=cfg.generation.temperature,
+            topp=cfg.generation.sampling_topp,
+        )
 
         for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
-            request_object = {
-                "inputs": prompt,
-                "max_tokens": None,
-                "min_tokens": [1] * batch_size,
-                "temperature": cfg.generation.temperature,
-                "top_p": cfg.generation.sampling_topp,
-                "logprobs": cfg.generation.logprobs,
-                "n": cfg.generation.beam,
-                "best_of": None,
-                "echo": False,
-                "stop": None,
-                "seed": None,
-                "use_cuda": True,
-            }
+            generations = generator.forward(prompt)
+            generations = generations["tokens"].reshape(-1, 64)
+            generations_text = []
 
-            if i == 0:
-                print(request_object)
-
-            generations = generator.generate(**request_object)
-            smiles_batch = list(map(lambda x: x[0]["text"], generations))
+            for token_idx_list in generations:
+                token_text_list = [
+                    generator_old.bpe.bpe.decode([token_idx])
+                    for token_idx in token_idx_list
+                    if token_idx not in {0, 1, 2, 3}
+                ]
+                generations_text.append("".join(token_text_list))
 
             if cfg.generation.mol_repr == "smiles":
                 # write in a file
-                write_func("\n".join(smiles_batch) + "\n")
+                write_func("\n".join(generations_text) + "\n")
             else:
                 try:
                     # if selfies
                     canon_smiles_batch = parmap.map(
-                        make_canonical_smiles, smiles_batch, pm_processes=2
+                        make_canonical_smiles, generations_text, pm_processes=2
                     )
 
                     # write in a file
                     write_func("\n".join(canon_smiles_batch) + "\n")
 
                     # wrire selfies
-                    write_func_sf("\n".join(smiles_batch) + "\n")
+                    write_func_sf("\n".join(generations_text) + "\n")
                 except:
                     pass
 
@@ -187,6 +192,7 @@ def cli_main():
     parser.set_defaults(lr_scheduler=None, criterion=None)
     flat_launch_args = []
     for s in LAUNCH_ARGS:
+        print(s)
         flat_launch_args += s.split()
     args = options.parse_args_and_arch(parser, input_args=flat_launch_args)
     args.data = os.path.dirname(args.path)  # hardcode the data arg

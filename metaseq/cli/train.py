@@ -254,9 +254,7 @@ def train(
             if distributed_utils.is_master(cfg.distributed_training)
             else None
         ),
-        wandb_run_name=os.environ.get(
-            "WANDB_NAME", os.path.basename(cfg.checkpoint.save_dir)
-        ),
+        wandb_run_name=os.environ.get("WANDB_NAME", cfg.common.wandb_run_name),
     )
     progress.update_config(_flatten_config(cfg))
 
@@ -688,9 +686,7 @@ def validate(
                     if distributed_utils.is_master(cfg.distributed_training)
                     else None
                 ),
-                wandb_run_name=os.environ.get(
-                    "WANDB_NAME", os.path.basename(cfg.checkpoint.save_dir)
-                ),
+                wandb_run_name=os.environ.get("WANDB_NAME", cfg.common.wandb_run_name),
             )
 
             logger.info(

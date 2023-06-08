@@ -118,6 +118,10 @@ class CommonConfig(MetaseqDataclass):
         default=None,
         metadata={"help": "Weights and Biases project name to use for logging"},
     )
+    wandb_run_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Weights and Biases run name to use for logging"},
+    )
     azureml_logging: Optional[bool] = field(
         default=False,
         metadata={"help": "Log scalars to AzureML context"},

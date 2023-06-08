@@ -174,6 +174,7 @@ class SequenceGenerator(nn.Module):
         # convert to float before the temparture divide to ensure good precision.
         # Avoid dividing by 1.0 to prevent unnecessary numerical instability
         # and always log in float
+        # shape=(bsz * beam_size, prompt_len, vocab_size)
         model_predictions = model_out[0].float()
         if self.temperature > 0 and self.temperature != 1.0:
             model_predictions.div_(self.temperature)
