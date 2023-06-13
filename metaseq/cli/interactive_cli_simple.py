@@ -25,6 +25,7 @@ import time
 import selfies as sf
 import parmap
 import gradio as gr
+import csv
 
 import torch
 
@@ -88,7 +89,8 @@ def make_canonical_smiles(selfies):
     try:
         canon_smiles = Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
     except:
-        pass
+        print("Can't make canonical", selfies)
+        return ""
 
     return canon_smiles
 
@@ -129,9 +131,10 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
         csv_file_sf = open(file_path_sf, "wt+")
         write_func_sf = functools.partial(csv_file_sf.write)
 
+        # Shape: (batch_size, 2)
         prompt = torch.LongTensor([2, 0]).repeat(batch_size, 1)
-
         progress = gr.Progress()
+
         generator = ImageSequenceGenerator(
             models[0],
             tgt_dict,
@@ -143,6 +146,7 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
 
         for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
             generations = generator.forward(prompt)
+            # Shape: (batch_size, 64)
             generations = generations["tokens"].reshape(-1, 64)
             generations_text = []
 
@@ -159,7 +163,7 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
                 write_func("\n".join(generations_text) + "\n")
             else:
                 try:
-                    # if selfies
+                    # if selfies convert to smiles
                     canon_smiles_batch = parmap.map(
                         make_canonical_smiles, generations_text, pm_processes=2
                     )
@@ -171,6 +175,7 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
                     write_func_sf("\n".join(generations_text) + "\n")
                 except:
                     pass
+        csv_file.close()
 
         print(f"Saved in {file_path}.")
 

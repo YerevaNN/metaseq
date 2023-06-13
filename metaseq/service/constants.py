@@ -13,13 +13,13 @@ MODEL_PARALLEL = 1
 TOTAL_WORLD_SIZE = 1
 MAX_BEAM = 1
 SAMPLING_TOPP = 1
-TEMPERATURE = 0.8
-GEN_LEN = 40_000_000
+TEMPERATURE = 1
+GEN_LEN = 10000
 LOGPROBS = 0
-DESCRIPTION = f"temp_{TEMPERATURE}"
+DESCRIPTION = f"temp_{TEMPERATURE}_10K_aa_exp"
 MOL_REPR = "selfies"  # selfies/smiles
 CHECKPOINT_ITER = 190000
-CHECKPOINT_FOLDER = "../Molecular_Generation_with_GDB13/Checkpoints/Sas_3_selfies"  # Generations_aspirin_0.4 / Generations_sas_3_selfies / Generations_all
+CHECKPOINT_FOLDER = "../Molecular_Generation_with_GDB13/Checkpoints/Ablations_10K/Generations_sas_3_selfies"  # Generations_aspirin_0.4 / Generations_sas_3_selfies / Generations_all
 
 # TOKENIZER = "--hf-tokenizer Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_smiles/old_tokenizer_smiles.json" \
 TOKENIZER = (

@@ -12,12 +12,10 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 import gradio as gr
-from metaseq import utils
 
 logger = logging.getLogger(__name__)
 
 IMAGE_TOKENS_COUNT = 1024
-TEXT_TOKENS_COUNT = 64
 
 GeneratorIteratorState = namedtuple(
     "GeneratorIteratorState", ["logits", "scores", "tokens"]
@@ -144,71 +142,58 @@ class ImageSequenceGenerator(nn.Module):
         return lprobs
 
     @torch.inference_mode()
-    # def forward(self, src_tokens: Tensor, src_tokens_unconditional: Tensor):
-    def forward(self, src_tokens_unconditional: Tensor):
-        # src_tokens = src_tokens.to(self.dummy_param.device)
+    def forward(self, src_tokens: Tensor, src_tokens_unconditional: Tensor):
+        src_tokens = src_tokens.to(self.dummy_param.device)
         src_tokens_unconditional = src_tokens_unconditional.to(self.dummy_param.device)
 
-        # bsz, _ = src_tokens.size()[:2]
-        bsz, src_len = src_tokens_unconditional.size()[:2]
-        # min_len = src_len + 1
-        min_len = 1
-        print(f"Range of sequence len [{min_len} - {TEXT_TOKENS_COUNT}]")
-
+        bsz, _ = src_tokens.size()[:2]
         scores = (
-            torch.zeros(bsz * self.beam_size, TEXT_TOKENS_COUNT)
-            .to(src_tokens_unconditional)
+            torch.zeros(bsz * self.beam_size, IMAGE_TOKENS_COUNT + 1)
+            .to(src_tokens)
             .float()
         )
         tokens = (
-            torch.zeros(bsz * self.beam_size, TEXT_TOKENS_COUNT)
-            .to(src_tokens_unconditional)
+            torch.zeros(bsz * self.beam_size, IMAGE_TOKENS_COUNT + 1)
+            .to(src_tokens)
             .long()
             .fill_(self.pad)
         )
         self.shared_state: List[GeneratorIteratorState] = []
-        # src_token_iterator = self.generate_iterator(src_tokens)
+        src_token_iterator = self.generate_iterator(src_tokens)
         src_tokens_unconditional_iterator = self.generate_iterator(
             src_tokens_unconditional
         )
-        for step in range(TEXT_TOKENS_COUNT - 1):
+        for step in self.progress.tqdm(range(IMAGE_TOKENS_COUNT)):
             # Can't use zip because of gradio progress bar
-            # conditional_logit = next(src_token_iterator)
-
-            # Shape: (bsz, vocab)
+            conditional_logit = next(src_token_iterator)
             unconditional_logit = next(src_tokens_unconditional_iterator)
-
             # Keep Only Image Tokens
-            # conditional_logit = self.mask_non_image(conditional_logit)
-            # unconditional_logit = self.mask_non_image(unconditional_logit)
-
+            conditional_logit = self.mask_non_image(conditional_logit)
+            unconditional_logit = self.mask_non_image(unconditional_logit)
             # Do Classifier Free Guidance
-            # cfg_mixed_logits = _classifier_free_guidance(
-            #     self.cfg_weight,
-            #     conditioned_logits=conditional_logit,
-            #     unconditioned_logits=unconditional_logit,
-            # )
-
-            # Apply temperature and get log probabilities
-            # cfg_mixed_logits.div_(self.temperature)
-            unconditional_logit.div_(self.temperature)
-
-            lprobs = self.model.get_normalized_probs(
-                unconditional_logit, log_probs=True
+            cfg_mixed_logits = _classifier_free_guidance(
+                self.cfg_weight,
+                conditioned_logits=conditional_logit,
+                unconditioned_logits=unconditional_logit,
             )
-
+            # Apply temperature and get log probabilities
+            cfg_mixed_logits.div_(self.temperature)
+            cfg_mixed_lprobs = self.model.get_normalized_probs(
+                cfg_mixed_logits, log_probs=True
+            )
             # Mask out EOS, PAD tokens
-            lprobs = self.mask_special_tokens(step, lprobs, min_len)
-
+            cfg_mixed_lprobs = self.mask_special_tokens(
+                step, cfg_mixed_lprobs, IMAGE_TOKENS_COUNT
+            )
             # Sample the next token
             next_scores, next_toks = _sample_topp(
-                self.temperature, self.sampling_topp, lprobs
+                self.temperature, self.sampling_topp, cfg_mixed_lprobs
             )
             tokens[:, step] = next_toks
             scores[:, step] = next_scores
             # Update the shared state so that sub-iterators can replace their tokens
             self.shared_state.append(
-                GeneratorIteratorState(lprobs, next_scores, next_toks)
+                GeneratorIteratorState(cfg_mixed_logits, next_scores, next_toks)
             )
         # we want the highest scoring items to be top ranked
         beamscores = scores.view(bsz, self.beam_size, -1).cumsum(dim=-1)[:, :, -1]
@@ -240,14 +225,9 @@ class ImageSequenceGenerator(nn.Module):
         bsz, src_len = src_tokens.size()[:2]
         beam_size = self.beam_size
 
-        max_len = src_len + TEXT_TOKENS_COUNT
+        max_len = src_len + IMAGE_TOKENS_COUNT
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
-
-        ######## move to cuda ##########
-        src_tokens = utils.move_to_cuda(src_tokens)
-        ################################
-
         new_order = new_order.to(src_tokens.device).long()
 
         # initialize buffers
@@ -261,7 +241,6 @@ class ImageSequenceGenerator(nn.Module):
         start_step = src_tokens.shape[1]
         # set all the forced tokens
         tokens[:, :start_step] = src_tokens.repeat_interleave(beam_size, 0)
-
         # compute the model predictions
         model_out = self.model.decoder(
             tokens[:, :start_step],
