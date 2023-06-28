@@ -171,6 +171,14 @@ class ImageSequenceGenerator(nn.Module):
         src_tokens_unconditional_iterator = self.generate_iterator(
             src_tokens_unconditional
         )
+
+        ######## move to cuda ##########
+        src_tokens_unconditional = utils.move_to_cuda(src_tokens_unconditional)
+        ################################
+
+        eos_mask = torch.zeros(src_tokens_unconditional.size(0), dtype=torch.bool, device=src_tokens_unconditional.device)
+
+
         for step in range(TEXT_TOKENS_COUNT - 1):
             # Can't use zip because of gradio progress bar
             # conditional_logit = next(src_token_iterator)
@@ -200,10 +208,24 @@ class ImageSequenceGenerator(nn.Module):
             # Mask out EOS, PAD tokens
             lprobs = self.mask_special_tokens(step, lprobs, min_len)
 
+            # already ended beams should only do eos
+            lprobs[eos_mask, : self.eos] = -math.inf
+            lprobs[eos_mask, self.eos + 1 :] = -math.inf
+
+
             # Sample the next token
             next_scores, next_toks = _sample_topp(
                 self.temperature, self.sampling_topp, lprobs
             )
+
+            eos_mask |= next_toks == self.eos
+            for stop_token in self.stop:
+                # if there are other early stopping tokens, allow those to trigger stop
+                eos_mask |= next_toks == stop_token
+
+            if torch.all(eos_mask):
+                break
+
             tokens[:, step] = next_toks
             scores[:, step] = next_scores
             # Update the shared state so that sub-iterators can replace their tokens
