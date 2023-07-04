@@ -153,7 +153,7 @@ class ImageSequenceGenerator(nn.Module):
         bsz, src_len = src_tokens_unconditional.size()[:2]
         # min_len = src_len + 1
         min_len = 1
-        print(f"Range of sequence len [{min_len} - {TEXT_TOKENS_COUNT}]")
+        # print(f"Range of sequence len [{min_len} - {TEXT_TOKENS_COUNT}]")
 
         scores = (
             torch.zeros(bsz * self.beam_size, TEXT_TOKENS_COUNT)

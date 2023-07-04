@@ -689,6 +689,7 @@ class CommonEvalConfig(MetaseqDataclass):
             "argparse_alias": "--sp",
         },
     )
+    return_perplexities: bool = field(default=False, metadata={"help": "also return perplexitites of each doc"})
 
 
 @dataclass

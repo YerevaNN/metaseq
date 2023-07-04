@@ -162,7 +162,7 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
                     # write in a file
                     write_func("\n".join(canon_smiles_batch) + "\n")
 
-                    # wrire selfies
+                    # write selfies
                     write_func_sf("\n".join(smiles_batch) + "\n")
                 except:
                     pass

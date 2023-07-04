@@ -13,22 +13,21 @@ MODEL_PARALLEL = 1
 TOTAL_WORLD_SIZE = 1
 MAX_BEAM = 1
 SAMPLING_TOPP = 1
-TEMPERATURE = 1
-GEN_LEN = 10000
+TEMPERATURE = 0.95
+GEN_LEN = 10_000
 LOGPROBS = 0
-DESCRIPTION = f"temp_{TEMPERATURE}_10K_aa_exp"
+DESCRIPTION = f"temp_{TEMPERATURE}_10K_exps"
 MOL_REPR = "selfies"  # selfies/smiles
-CHECKPOINT_ITER = 190000
-CHECKPOINT_FOLDER = "../Molecular_Generation_with_GDB13/Checkpoints/Ablations_10K/Generations_sas_3_selfies"  # Generations_aspirin_0.4 / Generations_sas_3_selfies / Generations_all
+CHECKPOINT_ITER = 60000
+CHECKPOINT_FOLDER = "Molecular_Generation_with_GDB13/checkpoints/ablations_10K/generations_aspirin_0.4_sf"  # Generations_aspirin_0.4 / Generations_sas_3_selfies / Generations_all
 
 # TOKENIZER = "--hf-tokenizer Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_smiles/old_tokenizer_smiles.json" \
 TOKENIZER = (
-    "--vocab-filename ../Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_smiles/vocab.txt"
+    "--vocab-filename Molecular_Generation_with_GDB13/data/tokenizers/tokenizer_sm/vocab.txt"
     if MOL_REPR == "smiles"
-    else "--hf-tokenizer  ../Molecular_Generation_with_GDB13/Data/tokenizers/tokenizer_selfies/tokenizer.json"
+    else "--hf-tokenizer  Molecular_Generation_with_GDB13/data/tokenizers/tokenizer_sf/tokenizer.json"
 )
 
-# TOKENIZER = "data-bin/deepchem_dir/vocab.txt" if MOL_REPR=="smiles" else "data-bin/tokenizers/tokenizer_selfies/tokenizer.json"
 
 # tokenizer files
 MODEL_FILE = os.path.join(CHECKPOINT_FOLDER, f"checkpoint_{CHECKPOINT_ITER}.pt")
@@ -44,7 +43,6 @@ LAUNCH_ARGS = [
     f"--sampling-topp {SAMPLING_TOPP}",
     f"--logprobs {LOGPROBS}",
     f"--generation-len {GEN_LEN}",
-    f"--temperature {TEMPERATURE}",
     f"--description {DESCRIPTION}",
     f"--output-file-path {FILE_PATH}",
     f"--mol-repr {MOL_REPR}",

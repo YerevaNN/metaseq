@@ -4,45 +4,68 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import csv
-from tqdm import tqdm
 
 import torch
-import torch.nn.functional as F
+
+from dataclasses import dataclass, field
 
 from metaseq import metrics, utils
+from metaseq.dataclass import MetaseqDataclass
 from metaseq.criterions import BaseCriterion, register_criterion
 
+@dataclass
+class LabelSmoothedCrossEntropyCriterionConfig(MetaseqDataclass):
+    label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "epsilon for label smoothing, 0 means no label smoothing"},
+    )
+    report_accuracy: bool = field(
+        default=False,
+        metadata={"help": "report accuracy metric"},
+    )
+    ignore_prefix_size: int = field(
+        default=0,
+        metadata={"help": "Ignore first N tokens"},
+    )
 
-def nll_loss(lprobs, target, ignore_index=None, reduction="mean"):
-    """Like torch.nn.functional.nll_loss but works for large inputs."""
-    if lprobs.numel() < 2e9:
-        return F.nll_loss(
-            lprobs, target, ignore_index=ignore_index, reduction=reduction
-        )
+
+def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
+
     nll_loss = -lprobs.gather(dim=-1, index=target)
+    smooth_loss = -lprobs.sum(dim=-1, keepdim=True)
+
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
         nll_loss.masked_fill_(pad_mask, 0.0)
+        smooth_loss.masked_fill_(pad_mask, 0.0)
     else:
         nll_loss = nll_loss.squeeze(-1)
-    if reduction == "mean":
-        nll_loss = nll_loss.mean()
-    elif reduction == "sum":
+        smooth_loss = smooth_loss.squeeze(-1)
+
+    if reduce:
         nll_loss = nll_loss.sum()
-    elif reduction == "none":
-        pass
-    else:
-        raise NotImplementedError
-    return nll_loss
+        smooth_loss = smooth_loss.sum()
+
+    eps_i = epsilon / (lprobs.size(-1) - 1)
+    loss = (1.0 - epsilon - eps_i) * nll_loss + eps_i * smooth_loss
+    return loss, nll_loss
 
 
-@register_criterion("cross_entropy")
-class CrossEntropyCriterion(BaseCriterion):
-    def __init__(self, task):
+@register_criterion("label_smoothed_cross_entropy", dataclass=LabelSmoothedCrossEntropyCriterionConfig)
+class LabelSmoothedCrossEntropyCriterion(BaseCriterion):
+    def __init__(
+        self, 
+        task,
+        label_smoothing,
+        ignore_prefix_size=0,
+        report_accuracy=False
+    ):
         super().__init__(task)
+        self.eps = label_smoothing
+        self.ignore_prefix_size = ignore_prefix_size
+        self.report_accuracy = report_accuracy
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -89,62 +112,25 @@ class CrossEntropyCriterion(BaseCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         lprobs = model.get_normalized_probs(net_output[0], log_probs=True)
+        target = model.get_targets(sample)
+
+        if self.ignore_prefix_size > 0:
+        # lprobs: B x T x C
+            lprobs = lprobs[:, self.ignore_prefix_size :, :].contiguous()
+            target = target[:, self.ignore_prefix_size :].contiguous()
+
         lprobs = lprobs.view(-1, lprobs.size(-1))
-        target = model.get_targets(sample).view(-1)
-        loss = nll_loss(
+        target = target.view(-1)
+
+        loss, nll_loss = label_smoothed_nll_loss(
             lprobs,
             target,
+            self.eps,
             ignore_index=self.padding_idx,
-            reduction="sum" if reduce else "none",
+            reduce=reduce
         )
 
         return loss, loss
-    
-    def compute_perplexity(self, model, sample):
-        net_output = model(**sample["net_input"])
-        lprobs = model.get_normalized_probs(net_output[0], log_probs=True)
-        lprobs = lprobs.view(-1, lprobs.size(-1))
-        target = model.get_targets(sample).view(-1)
-
-        special_token_indexes = [
-            self.task.target_dictionary.eos_index,
-            self.task.target_dictionary.pad_index,
-            self.task.target_dictionary.bos_index,
-            self.task.target_dictionary.unk_index,
-        ]
-
-        assert self.task.args["batch_size"] == 1,  "Put the batch-size to be equal 1"
-        assert self.task.args["sample_break_mode"] == "passthrough", "Put the sample-break-mode in 'passthrough' mode"
-
-        # Shape: (sequence_len, vocab)
-        lprobs_masked = lprobs.clone()   
-
-        # Shape: (sequence_len, 1) 
-        target_masked = target.clone()  
-        
-        # Remove special tokens
-        for i, target_i in enumerate(target):
-            if target_i in special_token_indexes:
-                lprobs_masked[i] = -100
-                target_masked[i] = -100
-
-
-        # Loss mean for one sequence through all its tokens
-        nll_loss_one_seq = F.nll_loss(
-            lprobs_masked,
-            target_masked,
-            ignore_index=-100,
-            reduction="mean"
-        )
-
-        # Perplexity of a sequence
-        pp_seq = utils.get_perplexity(nll_loss_one_seq, 4)
-
-        # Decode
-        # target_text = "".join([self.task.tokenizer.decode([t]) for t in target_masked.tolist() if t != -100])
-        
-        return pp_seq
-
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:

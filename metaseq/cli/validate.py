@@ -7,6 +7,7 @@
 import logging
 import os
 import sys
+import csv
 from argparse import Namespace
 from itertools import chain
 
@@ -109,12 +110,23 @@ def main(cfg: DictConfig, override_args=None):
             prefix=f"valid on '{subset}' subset",
         )
 
+        if cfg.common_eval.return_perplexities:
+            csv_file = open(cfg.common_eval.results_path, "wt+")
+            writer = csv.writer(csv_file)
+
         log_outputs = []
         for i, sample in enumerate(progress):
             sample = utils.move_to_cuda(sample) if use_cuda else sample
             _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
             progress.log(log_output, step=i)
             log_outputs.append(log_output)
+
+            if cfg.common_eval.return_perplexities:
+                pp_value = criterion.compute_perplexity(model, sample)
+                writer.writerow(str(pp_value))
+
+        if cfg.common_eval.return_perplexities:
+            csv_file.close()        
 
         if data_parallel_world_size > 1:
             log_outputs = distributed_utils.all_gather_list(

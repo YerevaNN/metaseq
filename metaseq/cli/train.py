@@ -183,7 +183,10 @@ def main(cfg: DictConfig) -> None:
             break
 
         # only use first validation loss to update the learning rate
-        trainer.lr_step(epoch_itr.epoch, valid_losses[0])
+        if valid_losses:
+            trainer.lr_step(epoch_itr.epoch, valid_losses[0])
+        else:
+            print("Passed without valid loss")    
 
         epoch_itr = trainer.get_train_iterator(
             epoch_itr.next_epoch_idx,
