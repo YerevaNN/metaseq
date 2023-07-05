@@ -123,7 +123,7 @@ def main(cfg: DictConfig, override_args=None):
 
             if cfg.common_eval.return_perplexities:
                 pp_value = criterion.compute_perplexity(model, sample)
-                writer.writerow(str(pp_value))
+                writer.writerow([str(pp_value)])
 
         if cfg.common_eval.return_perplexities:
             csv_file.close()        

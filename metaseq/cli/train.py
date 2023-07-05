@@ -266,13 +266,6 @@ def train(
     should_stop = False
     logger.info("Start iterating over samples")
 
-    ################################### For Perplexity ###################################
-    # valid_losses = validate(cfg, trainer, task, epoch_itr, valid_subsets)
-
-    # print("Exit")
-    # exit(1)
-    #######################################################################################
-
     def train(
         i,
         samples,
