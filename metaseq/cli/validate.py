@@ -10,6 +10,7 @@ import sys
 import csv
 from argparse import Namespace
 from itertools import chain
+from tqdm import tqdm
 
 import torch
 from omegaconf import DictConfig
@@ -111,36 +112,34 @@ def main(cfg: DictConfig, override_args=None):
         )
 
         if cfg.common_eval.return_perplexities:
-            csv_file = open(cfg.common_eval.results_path, "wt+")
-            writer = csv.writer(csv_file)
+            with open(cfg.common_eval.results_path, "w", newline='') as f:
+                writer = csv.writer(f)
 
-        log_outputs = []
-        for i, sample in enumerate(progress):
-            sample = utils.move_to_cuda(sample) if use_cuda else sample
-            _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
-            progress.log(log_output, step=i)
-            log_outputs.append(log_output)
+                for i, sample in tqdm(enumerate(progress)):
+                    sample = utils.move_to_cuda(sample) if use_cuda else sample
+                    pp_values = criterion.compute_perplexity(model, sample)
+                    writer.writerows(pp_values)
+        else:
+            log_outputs = []
+            for i, sample in tqdm(enumerate(progress)):
+                sample = utils.move_to_cuda(sample) if use_cuda else sample
+                _loss, _sample_size, log_output = task.valid_step(sample, model, criterion)
+                progress.log(log_output, step=i)
+                log_outputs.append(log_output)
 
-            if cfg.common_eval.return_perplexities:
-                pp_value = criterion.compute_perplexity(model, sample)
-                writer.writerow(str(pp_value))
+            if data_parallel_world_size > 1:
+                log_outputs = distributed_utils.all_gather_list(
+                    log_outputs,
+                    max_size=cfg.common.all_gather_list_size,
+                    group=distributed_utils.get_data_parallel_group(),
+                )
+                log_outputs = list(chain.from_iterable(log_outputs))
 
-        if cfg.common_eval.return_perplexities:
-            csv_file.close()        
+            with metrics.aggregate() as agg:
+                task.reduce_metrics(log_outputs, criterion)
+                log_output = agg.get_smoothed_values()
 
-        if data_parallel_world_size > 1:
-            log_outputs = distributed_utils.all_gather_list(
-                log_outputs,
-                max_size=cfg.common.all_gather_list_size,
-                group=distributed_utils.get_data_parallel_group(),
-            )
-            log_outputs = list(chain.from_iterable(log_outputs))
-
-        with metrics.aggregate() as agg:
-            task.reduce_metrics(log_outputs, criterion)
-            log_output = agg.get_smoothed_values()
-
-        progress.print(log_output, tag=subset, step=i)
+            progress.print(log_output, tag=subset, step=i)
 
 
 def cli_main():
