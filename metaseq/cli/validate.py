@@ -112,6 +112,7 @@ def main(cfg: DictConfig, override_args=None):
         )
 
         if cfg.common_eval.return_perplexities:
+
             with open(cfg.common_eval.results_path, "w", newline='') as f:
                 writer = csv.writer(f)
 
