@@ -133,6 +133,10 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
                 print(request_object)
 
             generations = generator.generate(**request_object)
+
+            # Clear cuda memory
+            torch.cuda.empty_cache()
+            
             smiles_batch = list(map(lambda x: x[0]["text"], generations))
 
             if cfg.generation.mol_repr == "smiles":

@@ -312,6 +312,8 @@ class GeneratorInterface:
             else:
                 all_distributions = None
 
+            del translations
+
             # actually turn everything into strings
             for i in range(all_tokens.size(0)):
                 beams = []

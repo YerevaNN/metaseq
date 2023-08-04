@@ -106,44 +106,62 @@ class CrossEntropyCriterion(BaseCriterion):
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = model.get_targets(sample).view(-1)
 
-        special_token_indexes = [
-            self.task.target_dictionary.eos_index,
-            self.task.target_dictionary.pad_index,
-            self.task.target_dictionary.bos_index,
-            self.task.target_dictionary.unk_index,
-        ]
+        perplexity_values = []
+        target_chunk_list = []
+        lprobs_chunk_list = []
+        target_chunks_list = []
 
-        assert self.task.args["batch_size"] == 1,  "Put the batch-size to be equal 1"
-        assert self.task.args["sample_break_mode"] == "passthrough", "Put the sample-break-mode in 'passthrough' mode"
+        # Shape: (batch_size * sequence_len) 
+        target_list = target.data.tolist() 
+        lprobs_list = lprobs.data.tolist() 
 
-        # Shape: (sequence_len, vocab)
-        lprobs_masked = lprobs.clone()   
+        for i in range(len(target_list)):
+            if target_list[i] == self.task.target_dictionary.bos_index:
+                # Start of the sequence
+                target_chunk_list = []
+                lprobs_chunk_list = []
+            elif target_list[i] == self.task.target_dictionary.eos_index:
+                # End of the sequence
+                if target_chunk_list:
+                    # Loss mean for one sequence through all its tokens
+                    lprobs_chunk = torch.Tensor(lprobs_chunk_list)
+                    target_chunk = torch.LongTensor(target_chunk_list)
 
-        # Shape: (sequence_len, 1) 
-        target_masked = target.clone()  
-        
-        # Remove special tokens
-        for i, target_i in enumerate(target):
-            if target_i in special_token_indexes:
-                lprobs_masked[i] = -100
-                target_masked[i] = -100
+                    nll_loss_one_seq = F.nll_loss(
+                        lprobs_chunk,
+                        target_chunk,
+                        reduction="mean"
+                    )
 
+                    # Perplexity of a sequence
+                    pp_seq = utils.get_perplexity(nll_loss_one_seq, 4)
 
-        # Loss mean for one sequence through all its tokens
-        nll_loss_one_seq = F.nll_loss(
-            lprobs_masked,
-            target_masked,
-            ignore_index=-100,
-            reduction="mean"
-        )
+                    # Row probability
+                    row_probs = torch.exp(lprobs_chunk)
+                    row_probs_max = torch.max(row_probs, dim=-1, keepdim=False).values
+                    row_probs_likelihood = torch.prod(row_probs_max).item()
 
-        # Perplexity of a sequence
-        pp_seq = utils.get_perplexity(nll_loss_one_seq, 4)
+                    # NLL
+                    nll_loss_one_seq = nll_loss_one_seq.item()
 
-        # Decode
-        # target_text = "".join([self.task.tokenizer.decode([t]) for t in target_masked.tolist() if t != -100])
-        
-        return pp_seq
+                    # PP, NLL, Probability
+                    vals = [f'{pp_seq}', f'{nll_loss_one_seq:.4f}', f'{row_probs_likelihood:.4f}']
+
+                    perplexity_values.append(vals)
+
+                    # For checking
+                    target_chunks_list.append(target_chunk_list)
+
+                target_chunk_list = []
+            else:
+                target_chunk_list.append(target_list[i])        
+                lprobs_chunk_list.append(lprobs_list[i]) 
+
+            # For checking
+            # print(target_chunks_list)           
+            
+
+        return perplexity_values
 
 
     @staticmethod

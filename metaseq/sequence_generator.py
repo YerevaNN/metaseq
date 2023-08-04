@@ -176,6 +176,10 @@ class SequenceGenerator(nn.Module):
         # and always log in float
         # shape=(bsz * beam_size, prompt_len, vocab_size)
         model_predictions = model_out[0].float()
+
+        del model_out
+
+
         if self.temperature > 0 and self.temperature != 1.0:
             model_predictions.div_(self.temperature)
         # lprobs is the log probability of each possible token in every position
