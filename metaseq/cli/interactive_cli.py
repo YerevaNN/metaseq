@@ -41,16 +41,6 @@ import rdkit.rdBase as rkrb
 
 rkrb.DisableLog("rdApp.error")
 
-if "METASEQ_SERVICE_CONSTANTS_MODULE" not in os.environ:
-    constants_module = importlib.import_module("metaseq.service.constants")
-else:
-    constants_module = importlib.import_module(
-        os.environ["METASEQ_SERVICE_CONSTANTS_MODULE"]
-    )
-TOTAL_WORLD_SIZE = constants_module.TOTAL_WORLD_SIZE
-LAUNCH_ARGS = constants_module.LAUNCH_ARGS
-INFERENCE_ARG_OVERRIDES = constants_module.INFERENCE_ARG_OVERRIDES
-
 logger = build_logger()
 
 
@@ -121,10 +111,6 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
         csv_file = open(file_path, "wt+")
         write_func = functools.partial(csv_file.write)
 
-        file_path_sf = file_path.split(".csv")[0] + "_selfies.csv"
-        csv_file_sf = open(file_path_sf, "wt+")
-        write_func_sf = functools.partial(csv_file_sf.write)
-
         prompt = [[]] * batch_size
 
         for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
@@ -161,9 +147,6 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
 
                     # write in a file
                     write_func("\n".join(canon_smiles_batch) + "\n")
-
-                    # write selfies
-                    write_func_sf("\n".join(smiles_batch) + "\n")
                 except:
                     pass
 
@@ -183,19 +166,8 @@ def cli_main():
     Command line interactive.
     """
     parser = options.get_generation_parser()
-    # dumb defaults overriding
-    parser.set_defaults(lr_scheduler=None, criterion=None)
-    flat_launch_args = []
-    for s in LAUNCH_ARGS:
-        flat_launch_args += s.split()
-    args = options.parse_args_and_arch(parser, input_args=flat_launch_args)
-    args.data = os.path.dirname(args.path)  # hardcode the data arg
+    args, extra = options.parse_args_and_arch(parser, parse_known=True)
     cfg = convert_namespace_to_omegaconf(args)
-    cfg.distributed_training.distributed_world_size = TOTAL_WORLD_SIZE
-
-    model_overrides = ast.literal_eval(cfg.common_eval.model_overrides)
-    model_overrides.update(INFERENCE_ARG_OVERRIDES)
-    cfg.common_eval.model_overrides = str(model_overrides)
 
     distributed_utils.call_main(cfg, worker_main, namespace_args=args)
 
