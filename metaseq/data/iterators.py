@@ -319,7 +319,7 @@ class StreamingEpochBatchIterator(EpochBatchIterating):
         # will not be copied with the right state
         if (
             "sequences_consumed" in state_dict
-            and max(state_dict["sequences_consumed"]) > 0
+            and len(state_dict["sequences_consumed"]) > 0
         ):
             sequences_consumed = state_dict["sequences_consumed"]
             n = state_dict["n"]
