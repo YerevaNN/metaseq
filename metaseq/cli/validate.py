@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import csv
+import time
 from argparse import Namespace
 from itertools import chain
 from tqdm import tqdm
@@ -105,6 +106,7 @@ def main(cfg: DictConfig, override_args=None):
             num_workers=cfg.dataset.num_workers,
             data_buffer_size=cfg.dataset.data_buffer_size,
         ).next_epoch_itr(shuffle=False)
+
         progress = progress_bar.get_progress_bar(
             itr,
             log_format=cfg.common.log_format,
@@ -113,13 +115,25 @@ def main(cfg: DictConfig, override_args=None):
         )
 
         if cfg.common_eval.return_perplexities:
+            start_time = time.time()
+
+            if not os.path.exists(os.path.dirname(cfg.common_eval.results_path)):
+                os.makedirs(os.path.dirname(cfg.common_eval.results_path))
+
+            if os.path.isfile(cfg.common_eval.results_path):
+                print(f"{cfg.common_eval.results_path} already exists")
+                sys.exit(1)
+
             with open(cfg.common_eval.results_path, "w", newline='') as f:
                 writer = csv.writer(f)
+                writer.writerow(["Name", "Perplexity", "NLL", "Probability"])
 
-                for i, sample in tqdm(enumerate(progress)):
+                for sample in tqdm(progress):
                     sample = utils.move_to_cuda(sample) if use_cuda else sample
                     pp_values = criterion.compute_perplexity(model, sample)
                     writer.writerows(pp_values)
+
+            print("Time", time.time() - start_time, "sec")
         else:
             log_outputs = []
             for i, sample in tqdm(enumerate(progress)):

@@ -144,8 +144,17 @@ class CrossEntropyCriterion(BaseCriterion):
                     # NLL
                     nll_loss_one_seq = nll_loss_one_seq.item()
 
-                    # PP, NLL, Probability
-                    vals = [f'{pp_seq}', f'{nll_loss_one_seq:.4f}', f'{row_probs_likelihood:.4f}']
+                    # Sequence decoded
+                    target_seq = "".join([self.task.tokenizer.decode([t]) for t in target_chunk_list])
+
+                    if len(self.task.dictionary.indices) < 200:
+                        # if selfies
+                        target_seq = utils.get_smiles_from_selfies(target_seq)
+                    else: 
+                         target_seq = utils.get_canonical_form(target_seq)
+
+                    # Smiles, PP, NLL, Probability
+                    vals = [target_seq, f'{pp_seq}', f'{nll_loss_one_seq:.4f}', f'{row_probs_likelihood:.8f}']
 
                     perplexity_values.append(vals)
 

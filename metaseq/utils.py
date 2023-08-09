@@ -14,6 +14,9 @@ import warnings
 import math
 from typing import List, Optional
 
+from rdkit import Chem
+import selfies as sf
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -33,6 +36,26 @@ logger = logging.getLogger(__name__)
 
 def split_paths(paths: str) -> List[str]:
     return paths.split(os.pathsep) if "://" not in paths else paths.split("|")
+
+
+def get_canonical_form(smiles: str):
+    try:
+        return Chem.MolToSmiles(Chem.MolFromSmiles(smiles), canonical=True)
+    except:
+        return ""   
+
+
+def get_smiles_from_selfies(selfies: str):
+    canon_smiles = None
+    smiles = sf.decoder(selfies)
+
+    try:
+        canon_smiles = get_canonical_form(smiles)
+    except:
+        print("Can't make canonical", selfies)
+        return ""
+
+    return canon_smiles   
 
 
 def apply_to_sample(f, sample):
