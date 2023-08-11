@@ -295,7 +295,6 @@ class ImageSequenceGenerator(nn.Module):
         # and always log in float
         model_predictions = model_out[0].float()
 
-        del model_out
         # Return First Token
         yield model_predictions[:, -1, :]
         for step in range(start_step, max_len):

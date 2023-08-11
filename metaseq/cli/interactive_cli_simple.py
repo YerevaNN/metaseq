@@ -15,6 +15,7 @@ import os
 import ast
 import random
 import sys
+import gc
 import logging
 import functools
 import re
@@ -133,8 +134,8 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
         for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
             generations = generator.forward(prompt)
 
-            # Clear cuda memory
-            torch.cuda.empty_cache()
+            # Clear memory
+            gc.collect()
 
             # Shape: (batch_size, 64)
             generations = generations["tokens"].reshape(-1, 64)
