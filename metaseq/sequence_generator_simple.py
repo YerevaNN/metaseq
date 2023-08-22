@@ -232,6 +232,16 @@ class ImageSequenceGenerator(nn.Module):
             self.shared_state.append(
                 GeneratorIteratorState(lprobs, next_scores, next_toks)
             )
+
+            del lprobs
+            del next_scores
+            del next_toks
+            del unconditional_logit
+            
+            # Clear cuda memory
+            torch.cuda.empty_cache()
+
+
         # we want the highest scoring items to be top ranked
         beamscores = scores.view(bsz, self.beam_size, -1).cumsum(dim=-1)[:, :, -1]
         indices = beamscores.sort(dim=-1, descending=True).indices
@@ -247,6 +257,13 @@ class ImageSequenceGenerator(nn.Module):
             "tokens": tokens.view(bsz, self.beam_size, -1),
             "scores": scores.view(bsz, self.beam_size, -1),
         }
+
+        del eos_mask
+        del src_tokens_unconditional
+        
+        # Clear cuda memory
+        torch.cuda.empty_cache()
+
         return retval
 
     @torch.inference_mode()
@@ -295,8 +312,13 @@ class ImageSequenceGenerator(nn.Module):
         # and always log in float
         model_predictions = model_out[0].float()
 
+        del model_out
+        del src_tokens
+        del new_order 
+
         # Return First Token
         yield model_predictions[:, -1, :]
+
         for step in range(start_step, max_len):
             # find our next tokens and record them
             # protect this step for the last token so we don't overflow
@@ -309,5 +331,17 @@ class ImageSequenceGenerator(nn.Module):
             )
             # see above for why this must remain float
             model_predictions = model_out[0].float()[:, -1, :]
+
+            del model_out
+
             # Return First Token
             yield model_predictions
+
+            del model_predictions
+
+            # Clear cuda memory
+            torch.cuda.empty_cache()
+
+        del tokens  
+
+           

@@ -108,7 +108,6 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
 
     if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
         batch_size = cfg.dataset.batch_size
-        seed = cfg.common.seed
         file_path = cfg.generation.output_file_path
 
         if os.path.exists(file_path):
@@ -134,7 +133,8 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
         for i in tqdm(range(math.ceil(cfg.generation.generation_len / batch_size))):
             generations = generator.forward(prompt)
 
-            # Clear memory
+            # Clear cuda memory
+            torch.cuda.empty_cache()
             gc.collect()
 
             # Shape: (batch_size, 64)
