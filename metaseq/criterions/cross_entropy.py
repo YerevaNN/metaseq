@@ -130,11 +130,11 @@ class CrossEntropyCriterion(BaseCriterion):
                     nll_loss_one_seq = F.nll_loss(
                         lprobs_chunk,
                         target_chunk,
-                        reduction="mean"
+                        reduction="sum"
                     )
 
                     # Perplexity of a sequence
-                    pp_seq = utils.get_perplexity(nll_loss_one_seq, 4)
+                    pp_seq = utils.get_perplexity(nll_loss_one_seq / len(lprobs_chunk) / math.log(2), 4)
 
                     # Row probability
                     row_probs = torch.exp(lprobs_chunk)
@@ -142,7 +142,7 @@ class CrossEntropyCriterion(BaseCriterion):
                     row_probs_likelihood = torch.prod(row_probs_max).item()
 
                     # NLL
-                    nll_loss_one_seq = nll_loss_one_seq.item()
+                    nll_loss_one_seq = nll_loss_one_seq.item() / len(lprobs_chunk) / math.log(2)
 
                     # Sequence decoded
                     target_seq = "".join([self.task.tokenizer.decode([t]) for t in target_chunk_list])
