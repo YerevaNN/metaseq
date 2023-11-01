@@ -73,17 +73,9 @@ def input_loop():
     return "\n".join(inp)
 
 
-def make_canonical_smiles(selfies):
-    canon_smiles = None
+def selfies_to_smiles(selfies):
     smiles = sf.decoder(selfies)
-
-    try:
-        canon_smiles = Chem.MolToSmiles(Chem.MolFromSmiles(smiles))
-    except:
-        print("Can't make canonical", selfies)
-        return ""
-
-    return canon_smiles
+    return smiles
 
 
 def worker_main(cfg: MetaseqConfig, namespace_args=None):
@@ -149,20 +141,15 @@ def worker_main(cfg: MetaseqConfig, namespace_args=None):
                 ]
                 generations_text.append("".join(token_text_list))
 
-            if cfg.generation.mol_repr == "smiles":
-                # write in a file
-                write_func("\n".join(generations_text) + "\n")
-            else:
-                try:
-                    # if selfies convert to smiles
-                    canon_smiles_batch = parmap.map(
-                        make_canonical_smiles, generations_text, pm_processes=2
+            if cfg.generation.mol_repr == "sf":
+                # if selfies convert to smiles
+                generations_text = parmap.map(
+                        selfies_to_smiles, generations_text, pm_processes=2
                     )
+                
+            # write in a file
+            write_func("\n".join(generations_text) + "\n")
 
-                    # write in a file
-                    write_func("\n".join(canon_smiles_batch) + "\n")
-                except:
-                    pass
         csv_file.close()
 
         print(f"Saved in {file_path}.")
