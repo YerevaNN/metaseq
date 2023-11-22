@@ -239,4 +239,9 @@ if __name__ == "__main__":
         --output-shard-name "opt-2.7b/reshard/reshard-model_part-0.pt" \
         --num-output-shards 1 --skip-optimizer-state True --unflatten-weights True
     """
-    fire.Fire(reshard_fsdp_checkpoints)
+    # fire.Fire(reshard_fsdp_checkpoints)
+    reshard_fsdp_checkpoints(input_glob_pattern="/home/ysu/molgen/Molecular_Generation_with_GDB13/checkpoints/OPT_1.2B_ep_1_half_sf_848M_2.00E-04/checkpoint_40000-shard*.pt",
+    output_shard_name="/home/ysu/molgen/Molecular_Generation_with_GDB13/checkpoints/OPT_1.2B_ep_1_half_sf_848M_2.00E-04/checkpoint_40000.pt",
+    num_output_shards=1,
+    unflatten_weights=True,
+    skip_optimizer_state=False)

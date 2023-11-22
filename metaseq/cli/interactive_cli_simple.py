@@ -74,8 +74,13 @@ def input_loop():
 
 
 def selfies_to_smiles(selfies):
+    smiles_type = ""
+
+    smiles_type = "[Canon]" if "[Canon]" in selfies else ("[Rand]" if "[Rand]" in selfies else "")
+    selfies = selfies.split(smiles_type)[1]    
+
     smiles = sf.decoder(selfies)
-    return smiles
+    return smiles_type + smiles
 
 
 def worker_main(cfg: MetaseqConfig, namespace_args=None):

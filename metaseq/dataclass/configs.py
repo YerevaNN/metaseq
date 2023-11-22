@@ -768,15 +768,15 @@ class EvalLMConfig(MetaseqDataclass):
 
 @dataclass
 class MetaseqConfig(MetaseqDataclass):
-    common: CommonConfig = CommonConfig()
-    common_eval: CommonEvalConfig = CommonEvalConfig()
-    distributed_training: DistributedTrainingConfig = DistributedTrainingConfig()
-    dataset: DatasetConfig = DatasetConfig()
-    optimization: OptimizationConfig = OptimizationConfig()
-    checkpoint: CheckpointConfig = CheckpointConfig()
-    generation: GenerationConfig = GenerationConfig()
-    eval_lm: EvalLMConfig = EvalLMConfig()
-    reshard: ReshardConfig = ReshardConfig()
+    common: CommonConfig = field(default=CommonConfig)
+    common_eval: CommonEvalConfig = field(default=CommonEvalConfig)
+    distributed_training: DistributedTrainingConfig = field(default=DistributedTrainingConfig)
+    dataset: DatasetConfig = field(default=DatasetConfig)
+    optimization: OptimizationConfig = field(default=OptimizationConfig)
+    checkpoint: CheckpointConfig = field(default=CheckpointConfig)
+    generation: GenerationConfig = field(default=GenerationConfig)
+    eval_lm: EvalLMConfig = field(default=EvalLMConfig)
+    reshard: ReshardConfig = field(default=ReshardConfig)
     model: Any = MISSING
     task: Any = MISSING
     criterion: Any = MISSING
